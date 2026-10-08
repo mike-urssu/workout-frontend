@@ -63,3 +63,38 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/** Workout app palette (from Figma). */
+export const Palette = {
+  bg: '#121214',
+  card: '#1e1e22',
+  surface: '#26262b',
+  inset: '#17171b',
+  border: '#2c2c35',
+  accent: '#b2e000',
+  muted: '#9a9aa6',
+  dim: '#5c5c66',
+  danger: '#ff4d4d',
+  live: '#22c55e',
+} as const;
+
+export const Font = {
+  manrope: {
+    regular: 'Manrope_400Regular',
+    medium: 'Manrope_500Medium',
+    semibold: 'Manrope_600SemiBold',
+    bold: 'Manrope_700Bold',
+    extrabold: 'Manrope_800ExtraBold',
+  },
+  outfit: {
+    semibold: 'Outfit_600SemiBold',
+    bold: 'Outfit_700Bold',
+    extrabold: 'Outfit_800ExtraBold',
+    black: 'Outfit_900Black',
+  },
+  inter: {
+    regular: 'Inter_400Regular',
+    medium: 'Inter_500Medium',
+    semibold: 'Inter_600SemiBold',
+  },
+} as const;
