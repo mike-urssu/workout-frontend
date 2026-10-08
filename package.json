@@ -48,7 +48,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "proxy": "node scripts/dev-proxy.mjs",
+    "web:proxy": "EXPO_PUBLIC_API_URL=http://localhost:8787 expo start --web"
   },
   "private": true
 }
