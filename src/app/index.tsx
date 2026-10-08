@@ -62,7 +62,7 @@ export default function LoginScreen() {
         const retryAt = new Date(String(e.details?.retryAt));
         setError({ field: 'pin', message: `PIN을 5회 잘못 입력해 잠겼습니다. ${clock(retryAt.getTime())} 이후 다시 시도하세요.` });
       } else if (e.code === 'AUTH_INVALID_CREDENTIALS') {
-        setError({ field: 'pin', message: '아이디 또는 PIN이 올바르지 않습니다.' });
+        setError({ field: 'pin', message: 'PIN이 올바르지 않습니다. 다시 입력해 주세요.' });
       } else if (e.code === 'VALIDATION_FAILED') {
         setError({ field: 'pin', message: 'PIN은 숫자 6자리여야 합니다.' });
       } else {
@@ -83,7 +83,8 @@ export default function LoginScreen() {
 
   if (checking) return <Screen><View /></Screen>;
 
-  const activeIndex = Math.min(pin.length, PIN_LENGTH - 1);
+  // Figma highlights the box of the last typed digit (first box while empty).
+  const activeIndex = Math.max(0, pin.length - 1);
   const pinFailed = error?.field === 'pin';
 
   return (
