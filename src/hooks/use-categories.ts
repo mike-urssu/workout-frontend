@@ -8,6 +8,12 @@ let cache: Category[] | null = null; // reference data: fetched once per app run
 /** Colour / photo for a body part; the server only sends the name and a remote image path. */
 export const styleOf = (name: string) => GROUPS.find((g) => g.name === name);
 
+/** Cached after the first call (reference data). */
+export async function loadCategories() {
+  cache ??= await getCategories();
+  return cache;
+}
+
 export function useCategories() {
   const [categories, setCategories] = useState<Category[]>(cache ?? []);
   useEffect(() => {
