@@ -1,114 +1,194 @@
-import { useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import {
+  CategoryTrend, ExerciseTrend, StatsExercise, getCategoryTrend, getExerciseTrend, getStatsExercises,
+} from '@/api/stats';
 import { LineChart } from '@/components/line-chart';
 import { Screen } from '@/components/screen';
 import { Font, Palette } from '@/constants/theme';
-import { GROUPS, MuscleGroupId, exerciseById, exercisesOf } from '@/data/catalog';
-import { Session, dateKey, doneSets, exerciseVolume, groupOf } from '@/data/workout';
-import { useWorkoutData } from '@/hooks/use-workout-data';
+import { styleOf } from '@/hooks/use-categories';
+import { errorMessage, notify } from '@/lib/dialog';
 
-const DAYS = 6;
 const LINE_COLORS = ['#b2e000', '#668aff', '#cc66ff', '#ff9933'];
+const MAX_EXERCISES = 4; // BR-018
+const label = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
 export default function StatsScreen() {
-  const { history } = useWorkoutData();
-  const [group, setGroup] = useState<MuscleGroupId>('chest');
-  const [picked, setPicked] = useState<string[] | null>(null);
-  const [today] = useState(() => Date.now());
+  const [trend, setTrend] = useState<CategoryTrend | null>(null);
+  const [newer, setNewer] = useState<CategoryTrend[]>([]); // intervals we paged past, kept for paging back
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [exercises, setExercises] = useState<StatsExercise[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [exTrend, setExTrend] = useState<ExerciseTrend | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // The chart window ends on the latest recorded day, so dummy/old data still shows up.
-  const latest = history.reduce((m, s) => Math.max(m, s.startedAt), 0);
-  const endDate = new Date(latest || today);
-  const days = Array.from({ length: DAYS }, (_, i) => {
-    const d = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() - (DAYS - 1 - i));
-    return { key: dateKey(d.getTime()), label: `${d.getMonth() + 1}/${d.getDate()}` };
-  });
-  const sessionsOn = (key: string): Session[] => history.filter((s) => dateKey(s.startedAt) === key);
-  const labels = days.map((d) => d.label);
+  const guard = async (fn: () => Promise<void>) => {
+    setLoading(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify(errorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const groupSeries = GROUPS.map((g) => ({
-    color: g.color,
-    values: days.map((d) =>
-      sessionsOn(d.key).flatMap((s) => s.exercises).filter((e) => groupOf(e) === g.id)
-        .reduce((sum, e) => sum + exerciseVolume(e), 0)),
-  }));
+  /** The exercise chart shares the dates of the body-part chart; nothing is requested for 0 exercises. */
+  const loadExerciseTrend = async (ids: string[], dates: string[]) =>
+    setExTrend(ids.length && dates.length ? await getExerciseTrend(ids, dates) : null);
 
-  // Exercises of the chosen group that have ever been recorded.
-  const recorded = exercisesOf(group).filter((ex) =>
-    history.some((s) => s.exercises.some((e) => e.exerciseId === ex.id && doneSets(e).length)));
-  const selected = (picked ?? recorded.slice(0, 2).map((e) => e.id)).filter((id) => recorded.some((r) => r.id === id));
-  const colorOf = (id: string) => LINE_COLORS[selected.indexOf(id) % LINE_COLORS.length];
-  const exerciseSeries = selected.map((id) => ({
-    color: colorOf(id),
-    values: days.map((d) =>
-      sessionsOn(d.key).flatMap((s) => s.exercises).filter((e) => e.exerciseId === id)
-        .reduce((sum, e) => sum + exerciseVolume(e), 0)),
-  }));
+  /** Picking a body part selects its first two recorded exercises. */
+  const chooseCategory = async (id: string, dates: string[]) => {
+    setCategoryId(id);
+    const list = await getStatsExercises(id);
+    const ids = list.slice(0, 2).map((e) => e.id);
+    setExercises(list);
+    setPicked(ids);
+    await loadExerciseTrend(ids, dates);
+  };
 
-  const toggle = (id: string) =>
-    setPicked(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  // Opening the screen always starts from the latest interval and the default selection.
+  useFocusEffect(
+    useCallback(() => {
+      guard(async () => {
+        const t = await getCategoryTrend();
+        setTrend(t);
+        setNewer([]);
+        setExTrend(null);
+        setExercises([]);
+        setPicked([]);
+        if (t.dates.length) await chooseCategory(t.categories[0].id, t.dates);
+        else setCategoryId(null);
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
+  const older = () =>
+    trend?.hasPrevious && !loading &&
+    guard(async () => {
+      const t = await getCategoryTrend(trend.dates[0]); // before = first shown day: the interval ends right before it
+      setNewer([...newer, trend]);
+      setTrend(t);
+      await loadExerciseTrend(picked, t.dates);
+    });
+
+  const newerInterval = () =>
+    newer.length > 0 && !loading &&
+    guard(async () => {
+      const t = newer[newer.length - 1];
+      setNewer(newer.slice(0, -1));
+      setTrend(t);
+      await loadExerciseTrend(picked, t.dates);
+    });
+
+  const toggle = (id: string) => {
+    if (loading || !trend) return;
+    const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
+    if (next.length > MAX_EXERCISES) return;
+    setPicked(next);
+    guard(() => loadExerciseTrend(next, trend.dates));
+  };
+
+  const colorOf = (id: string) => LINE_COLORS[picked.indexOf(id) % LINE_COLORS.length];
+  const labels = trend?.dates.map(label) ?? [];
+  const hasData = !!trend && trend.dates.length > 0;
 
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={{ gap: 2 }}>
           <Text style={styles.title}>운동 통계</Text>
-          <Text style={styles.subtitle}>부위별·종목별 주간 볼륨 추이</Text>
+          <Text style={styles.subtitle}>부위별·종목별 볼륨 추이</Text>
         </View>
 
-        <Text style={styles.section}>부위별 볼륨 추이</Text>
-        <View style={styles.card}>
-          <LineChart series={groupSeries} labels={labels} intervals={4} plotHeight={200} />
-          <View style={styles.legend}>
-            {GROUPS.map((g) => (
-              <View key={g.id} style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: g.color }]} />
-                <Text style={[styles.legendText, { color: g.color }]}>{g.name}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
+        {trend && !hasData && <Text style={styles.empty}>아직 운동 기록이 없어요</Text>}
 
-        <Text style={styles.section}>종목별 추이</Text>
-        <View style={styles.chips}>
-          {GROUPS.map((g) => {
-            const active = g.id === group;
-            return (
-              <Pressable
-                key={g.id}
-                onPress={() => { setGroup(g.id); setPicked(null); }}
-                style={[styles.chip, active ? { backgroundColor: '#26262b', borderColor: g.color } : { borderColor: `${g.color}4D` }]}>
-                <Text style={[styles.chipText, { color: g.color, fontFamily: active ? Font.manrope.bold : Font.manrope.semibold }]}>{g.name}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <View style={styles.chips}>
-          {recorded.length === 0 && <Text style={styles.empty}>기록된 종목이 없어요</Text>}
-          {recorded.map((ex) => {
-            const on = selected.includes(ex.id);
-            return (
-              <Pressable
-                key={ex.id}
-                onPress={() => toggle(ex.id)}
-                style={[styles.chip, on ? { backgroundColor: '#26262b', borderColor: colorOf(ex.id) } : { borderColor: Palette.border }]}>
-                <Text style={[styles.chipText, on ? { color: colorOf(ex.id), fontFamily: Font.manrope.bold } : { color: Palette.muted }]}>{ex.name}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <View style={styles.card}>
-          <LineChart series={exerciseSeries} labels={labels} intervals={3} plotHeight={150} />
-          <View style={styles.legend}>
-            {selected.map((id) => (
-              <View key={id} style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: colorOf(id) }]} />
-                <Text style={[styles.legendText, { color: Palette.muted }]}>{exerciseById(id).name}</Text>
+        {trend && (
+          <>
+            <View style={styles.sectionRow}>
+              <Text style={styles.section}>부위별 볼륨 추이</Text>
+              <View style={styles.pager}>
+                <Pressable style={[styles.pageBtn, !trend.hasPrevious && styles.pageOff]} onPress={older} disabled={!trend.hasPrevious || loading}>
+                  <ChevronLeft size={16} color="#fff" />
+                </Pressable>
+                <Pressable style={[styles.pageBtn, newer.length === 0 && styles.pageOff]} onPress={newerInterval} disabled={newer.length === 0 || loading}>
+                  <ChevronRight size={16} color="#fff" />
+                </Pressable>
               </View>
-            ))}
-          </View>
-        </View>
+            </View>
+            <View style={styles.card}>
+              <LineChart
+                series={trend.categories.map((c) => ({ color: styleOf(c.name)?.color ?? '#fff', values: c.volumes }))}
+                labels={labels}
+                intervals={4}
+                plotHeight={200}
+              />
+              <View style={styles.legend}>
+                {trend.categories.map((c) => {
+                  const color = styleOf(c.name)?.color ?? '#fff';
+                  return (
+                    <View key={c.id} style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: color }]} />
+                      <Text style={[styles.legendText, { color }]}>{c.name}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+
+            <Text style={styles.section}>종목별 추이</Text>
+            <View style={styles.chips}>
+              {trend.categories.map((c) => {
+                const active = c.id === categoryId;
+                const color = styleOf(c.name)?.color ?? '#fff';
+                return (
+                  <Pressable
+                    key={c.id}
+                    disabled={loading}
+                    onPress={() => !active && guard(() => chooseCategory(c.id, trend.dates))}
+                    style={[styles.chip, active ? { backgroundColor: '#26262b', borderColor: color } : { borderColor: `${color}4D` }]}>
+                    <Text style={[styles.chipText, { color, fontFamily: active ? Font.manrope.bold : Font.manrope.semibold }]}>{c.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.chips}>
+              {exercises.length === 0 && <Text style={styles.empty}>이 부위에 기록한 운동이 없어요</Text>}
+              {exercises.map((ex) => {
+                const on = picked.includes(ex.id);
+                return (
+                  <Pressable
+                    key={ex.id}
+                    disabled={loading}
+                    onPress={() => toggle(ex.id)}
+                    style={[styles.chip, on ? { backgroundColor: '#26262b', borderColor: colorOf(ex.id) } : { borderColor: Palette.border }]}>
+                    <Text style={[styles.chipText, on ? { color: colorOf(ex.id), fontFamily: Font.manrope.bold } : { color: Palette.muted }]}>{ex.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.card}>
+              <LineChart
+                series={(exTrend?.exercises ?? []).map((e) => ({ color: colorOf(e.id), values: e.volumes }))}
+                labels={labels}
+                intervals={3}
+                plotHeight={150}
+              />
+              <View style={styles.legend}>
+                {(exTrend?.exercises ?? []).map((e) => (
+                  <View key={e.id} style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: colorOf(e.id) }]} />
+                    <Text style={[styles.legendText, { color: Palette.muted }]}>{e.name}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </>
+        )}
       </ScrollView>
     </Screen>
   );
@@ -118,6 +198,13 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32, gap: 12 },
   title: { fontFamily: Font.outfit.bold, fontSize: 22, color: '#fff' },
   subtitle: { fontFamily: Font.manrope.regular, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  pager: { flexDirection: 'row', gap: 8 },
+  pageBtn: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: '#26262b', borderWidth: 1,
+    borderColor: Palette.border, alignItems: 'center', justifyContent: 'center',
+  },
+  pageOff: { opacity: 0.3 },
   section: { fontFamily: Font.outfit.bold, fontSize: 16, color: '#fff', marginTop: 12 },
   card: { backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, borderRadius: 20, padding: 16, gap: 12 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },

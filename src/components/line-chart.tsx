@@ -4,7 +4,8 @@ import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import { Font } from '@/constants/theme';
 
-export type Series = { color: string; values: number[] };
+/** null = no workout that day: no dot, the line joins the neighbouring points. */
+export type Series = { color: string; values: (number | null)[] };
 type Props = { series: Series[]; labels: string[]; intervals: number; plotHeight: number };
 
 const STEPS = [1, 1.5, 2, 2.5, 3, 5, 10];
@@ -19,7 +20,7 @@ const fmt = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g
 
 export function LineChart({ series, labels, intervals, plotHeight }: Props) {
   const [width, setWidth] = useState(0);
-  const max = niceMax(Math.max(0, ...series.flatMap((s) => s.values)), intervals);
+  const max = niceMax(Math.max(0, ...series.flatMap((s) => s.values.filter((v): v is number => v !== null))), intervals);
   const ticks = Array.from({ length: intervals + 1 }, (_, i) => (max / intervals) * i);
   const y = (v: number) => plotHeight - (v / max) * plotHeight;
   const x = (i: number) => ((i + 0.5) * width) / labels.length;
@@ -39,14 +40,14 @@ export function LineChart({ series, labels, intervals, plotHeight }: Props) {
           {series.map((s) => (
             <Polyline
               key={s.color}
-              points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
+              points={s.values.flatMap((v, i) => (v === null ? [] : [`${x(i)},${y(v)}`])).join(' ')}
               fill="none"
               stroke={s.color}
               strokeWidth={2}
               strokeLinejoin="round"
             />
           ))}
-          {series.map((s) => s.values.map((v, i) => <Circle key={`${s.color}${i}`} cx={x(i)} cy={y(v)} r={3} fill={s.color} />))}
+          {series.map((s) => s.values.map((v, i) => v === null ? null : <Circle key={`${s.color}${i}`} cx={x(i)} cy={y(v)} r={3} fill={s.color} />))}
         </Svg>
         <View style={styles.xRow}>
           {labels.map((l) => (
