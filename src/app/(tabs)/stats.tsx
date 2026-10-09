@@ -12,8 +12,8 @@ import { Font, Palette } from '@/constants/theme';
 import { styleOf } from '@/hooks/use-categories';
 import { errorMessage, notify } from '@/lib/dialog';
 
-const LINE_COLORS = ['#b2e000', '#668aff', '#cc66ff', '#ff9933'];
-const MAX_EXERCISES = 4; // BR-018
+// A body part has at most 8 exercises and all of them can be selected, so there are 8 line colours.
+const LINE_COLORS = ['#b2e000', '#668aff', '#cc66ff', '#ff9933', '#ff6b8b', '#2ed3b7', '#ffd23f', '#8fa3b8'];
 const label = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
 export default function StatsScreen() {
@@ -40,11 +40,11 @@ export default function StatsScreen() {
   const loadExerciseTrend = async (ids: string[], dates: string[]) =>
     setExTrend(ids.length && dates.length ? await getExerciseTrend(ids, dates) : null);
 
-  /** Picking a body part selects its first two recorded exercises. */
+  /** Picking a body part selects all of its recorded exercises (BR-017). */
   const chooseCategory = async (id: string, dates: string[]) => {
     setCategoryId(id);
     const list = await getStatsExercises(id);
-    const ids = list.slice(0, 2).map((e) => e.id);
+    const ids = list.map((e) => e.id);
     setExercises(list);
     setPicked(ids);
     await loadExerciseTrend(ids, dates);
@@ -70,7 +70,8 @@ export default function StatsScreen() {
   const older = () =>
     trend?.hasPrevious && !loading &&
     guard(async () => {
-      const t = await getCategoryTrend(trend.dates[0]); // before = first shown day: the interval ends right before it
+      // before = the latest day shown, so the interval slides back by one day (BR-016)
+      const t = await getCategoryTrend(trend.dates[trend.dates.length - 1]);
       setNewer([...newer, trend]);
       setTrend(t);
       await loadExerciseTrend(picked, t.dates);
@@ -88,12 +89,13 @@ export default function StatsScreen() {
   const toggle = (id: string) => {
     if (loading || !trend) return;
     const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
-    if (next.length > MAX_EXERCISES) return;
     setPicked(next);
     guard(() => loadExerciseTrend(next, trend.dates));
   };
 
-  const colorOf = (id: string) => LINE_COLORS[picked.indexOf(id) % LINE_COLORS.length];
+  const colorOf = (id: string) => LINE_COLORS[Math.max(0, picked.indexOf(id)) % LINE_COLORS.length];
+  // The previous response stays on screen until the new one arrives; draw only what is still selected.
+  const shown = (exTrend?.exercises ?? []).filter((e) => picked.includes(e.id));
   const labels = trend?.dates.map(label) ?? [];
   const hasData = !!trend && trend.dates.length > 0;
 
@@ -110,7 +112,7 @@ export default function StatsScreen() {
         {trend && (
           <>
             <View style={styles.sectionRow}>
-              <Text style={styles.section}>부위별 볼륨 추이</Text>
+              <Text style={styles.section}>부위별 볼륨 추이 (단위: 1,000kg)</Text>
               <View style={styles.pager}>
                 <Pressable style={[styles.pageBtn, !trend.hasPrevious && styles.pageOff]} onPress={older} disabled={!trend.hasPrevious || loading}>
                   <ChevronLeft size={16} color="#fff" />
@@ -140,7 +142,7 @@ export default function StatsScreen() {
               </View>
             </View>
 
-            <Text style={styles.section}>종목별 추이</Text>
+            <Text style={styles.section}>종목별 추이 (단위: 1,000kg)</Text>
             <View style={styles.chips}>
               {trend.categories.map((c) => {
                 const active = c.id === categoryId;
@@ -173,13 +175,14 @@ export default function StatsScreen() {
             </View>
             <View style={styles.card}>
               <LineChart
-                series={(exTrend?.exercises ?? []).map((e) => ({ color: colorOf(e.id), values: e.volumes }))}
+                series={shown.map((e) => ({ color: colorOf(e.id), values: e.volumes }))}
                 labels={labels}
                 intervals={3}
                 plotHeight={150}
+                compact
               />
               <View style={styles.legend}>
-                {(exTrend?.exercises ?? []).map((e) => (
+                {shown.map((e) => (
                   <View key={e.id} style={styles.legendItem}>
                     <View style={[styles.legendDot, { backgroundColor: colorOf(e.id) }]} />
                     <Text style={[styles.legendText, { color: Palette.muted }]}>{e.name}</Text>

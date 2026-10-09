@@ -6,7 +6,7 @@ import { Font } from '@/constants/theme';
 
 /** null = no workout that day: no dot, the line joins the neighbouring points. */
 export type Series = { color: string; values: (number | null)[] };
-type Props = { series: Series[]; labels: string[]; intervals: number; plotHeight: number };
+type Props = { series: Series[]; labels: string[]; intervals: number; plotHeight: number; compact?: boolean };
 
 const STEPS = [1, 1.5, 2, 2.5, 3, 5, 10];
 /** Smallest "nice" axis max (≥ value) split evenly into `intervals`. */
@@ -16,9 +16,10 @@ function niceMax(value: number, intervals: number) {
   const step = (STEPS.find((s) => s * mag >= raw) ?? 10) * mag;
   return step * intervals;
 }
-const fmt = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+/** Axis labels are in 1,000 kg (the section titles say "단위: 1,000kg"). */
+const fmt = (n: number) => (n / 1000).toFixed(1);
 
-export function LineChart({ series, labels, intervals, plotHeight }: Props) {
+export function LineChart({ series, labels, intervals, plotHeight, compact }: Props) {
   const [width, setWidth] = useState(0);
   const max = niceMax(Math.max(0, ...series.flatMap((s) => s.values.filter((v): v is number => v !== null))), intervals);
   const ticks = Array.from({ length: intervals + 1 }, (_, i) => (max / intervals) * i);
@@ -29,7 +30,7 @@ export function LineChart({ series, labels, intervals, plotHeight }: Props) {
     <View style={styles.row}>
       <View style={{ width: 28, height: plotHeight }}>
         {ticks.map((t) => (
-          <Text key={t} style={[styles.yLabel, { top: y(t) - 6 }]}>{fmt(t)}</Text>
+          <Text key={t} style={[styles.yLabel, compact && styles.yLabelCompact, { top: y(t) - 6 }]}>{fmt(t)}</Text>
         ))}
       </View>
       <View style={styles.plot} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -37,9 +38,9 @@ export function LineChart({ series, labels, intervals, plotHeight }: Props) {
           {ticks.map((t) => (
             <Line key={t} x1={0} x2={width} y1={y(t)} y2={y(t)} stroke="rgba(255,255,255,0.06)" strokeWidth={1} />
           ))}
-          {series.map((s) => (
+          {series.map((s, si) => (
             <Polyline
-              key={s.color}
+              key={si}
               points={s.values.flatMap((v, i) => (v === null ? [] : [`${x(i)},${y(v)}`])).join(' ')}
               fill="none"
               stroke={s.color}
@@ -47,11 +48,11 @@ export function LineChart({ series, labels, intervals, plotHeight }: Props) {
               strokeLinejoin="round"
             />
           ))}
-          {series.map((s) => s.values.map((v, i) => v === null ? null : <Circle key={`${s.color}${i}`} cx={x(i)} cy={y(v)} r={3} fill={s.color} />))}
+          {series.map((s, si) => s.values.map((v, i) => v === null ? null : <Circle key={`${si}-${i}`} cx={x(i)} cy={y(v)} r={3} fill={s.color} />))}
         </Svg>
         <View style={styles.xRow}>
-          {labels.map((l) => (
-            <Text key={l} style={styles.xLabel}>{l}</Text>
+          {labels.map((l, i) => (
+            <Text key={i} style={styles.xLabel}>{l}</Text>
           ))}
         </View>
       </View>
@@ -69,6 +70,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9a9aa6',
   },
+  yLabelCompact: { fontFamily: Font.inter.regular, fontSize: 9, color: 'rgba(255,255,255,0.35)' },
   xRow: { flexDirection: 'row', marginTop: 4 },
   xLabel: {
     flex: 1,
