@@ -105,7 +105,7 @@ export default function RecordScreen() {
     }
   };
 
-  const addRow = () => setRows((all) => [...all, draft(all[all.length - 1]?.weight ?? null)]);
+  const addRow = () => setRows((all) => [...all, draft(null)]);
 
   /** BR-021: loading replaces the sets of this exercise; saved sets are deleted after a confirmation. */
   const loadPrev = async () => {
