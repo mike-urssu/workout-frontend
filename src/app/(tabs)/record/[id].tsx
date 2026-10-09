@@ -141,7 +141,13 @@ export default function RecordScreen() {
         }
       />
 
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        // iOS: lift the content above the keyboard and scroll the focused field into view (Android resizes the window).
+        automaticallyAdjustKeyboardInsets
+        // number pads have no "done" key, so dragging the list is how the keyboard is dismissed
+        keyboardDismissMode="on-drag">
         <View style={styles.meta}>
           <View style={styles.pill}>
             <View style={styles.liveDot} />
@@ -299,7 +305,7 @@ const styles = StyleSheet.create({
   },
   prevBtnLoaded: { backgroundColor: 'rgba(178,224,0,0.13)', borderColor: Palette.accent, borderWidth: 1.5 },
   prevText: { fontFamily: Font.manrope.medium, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
-  body: { paddingHorizontal: 24, paddingVertical: 8, gap: 16 },
+  body: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24, gap: 16 },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   pill: {
     flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8,
