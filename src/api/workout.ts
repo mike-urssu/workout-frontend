@@ -48,6 +48,8 @@ export const completeSession = (id: string, mediaIds: string[]) =>
 
 export const addExercise = (sid: string, exerciseId: string) =>
   request<SessionExercise>(`${sessions}/${sid}/exercises`, { method: 'POST', body: { exerciseId } });
+export const removeExercise = (sid: string, seid: string) =>
+  request(`${sessions}/${sid}/exercises/${seid}`, { method: 'DELETE' });
 export const addSet = (sid: string, seid: string, weight: number, repetitions: number) =>
   request<SetDto>(setsPath(sid, seid), { method: 'POST', body: { weight, repetitions } });
 export const updateSet = (sid: string, seid: string, setId: string, weight: number, repetitions: number) =>

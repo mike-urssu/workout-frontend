@@ -8,7 +8,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { ApiError } from '@/api/client';
 import { logout } from '@/api/auth';
 import {
-  Session, cancelSession, completeSession, sessionBreakdown, startSession, toMs, uploadMedia,
+  Session, cancelSession, completeSession, removeExercise, sessionBreakdown, startSession, toMs, uploadMedia,
 } from '@/api/workout';
 import { GroupBreakdown } from '@/components/group-breakdown';
 import { Screen } from '@/components/screen';
@@ -224,6 +224,10 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
           ids.push(done[a.uri]);
         }
       }
+      // Exercises that were only opened (no sets) would otherwise count as "performed" once the session completes.
+      await Promise.all(
+        session.exercises.filter((e) => e.setCount === 0).map((e) => removeExercise(session.id, e.sessionExerciseId).catch(() => {})),
+      );
       await completeSession(session.id, ids);
       setPicked([]);
       setUploaded({});
