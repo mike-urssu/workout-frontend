@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Check } from 'lucide-react-native';
+import { Check, CircleX } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -25,6 +25,7 @@ export default function LoginScreen() {
   const [error, setError] = useState<{ field: 'username' | 'pin'; message: string } | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const pinRef = useRef<TextInput>(null);
+  const usernameRef = useRef<TextInput>(null);
 
   // App start: a stored token skips the login screen if the server still accepts it.
   useEffect(() => {
@@ -122,19 +123,30 @@ export default function LoginScreen() {
         <View style={styles.form}>
           <View style={styles.field}>
             <Text style={styles.label}>사용자 이름</Text>
-            <TextInput
-              style={[styles.input, error?.field === 'username' && styles.inputFailed]}
-              value={username}
-              onChangeText={(t) => { setUsername(t); setError(null); }}
-              placeholder="아이디 입력"
-              placeholderTextColor="rgba(255,255,255,0.5)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={100}
-              editable={!submitting}
-              returnKeyType="next"
-              onSubmitEditing={() => pinRef.current?.focus()}
-            />
+            <View style={[styles.input, error?.field === 'username' && styles.inputFailed]}>
+              <TextInput
+                ref={usernameRef}
+                style={styles.inputText}
+                value={username}
+                onChangeText={(t) => { setUsername(t); setError(null); }}
+                placeholder="아이디 입력"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={100}
+                editable={!submitting}
+                returnKeyType="next"
+                onSubmitEditing={() => pinRef.current?.focus()}
+              />
+              <Pressable
+                style={[styles.clear, !username && { opacity: 0.35 }]}
+                onPress={() => { setUsername(''); setError(null); usernameRef.current?.focus(); }}
+                disabled={!username || submitting}
+                hitSlop={8}
+                accessibilityLabel="아이디 지우기">
+                <CircleX size={14} color="rgba(255,255,255,0.6)" />
+              </Pressable>
+            </View>
             {error?.field === 'username' && <Text style={styles.error}>{error.message}</Text>}
             <Pressable style={styles.rememberRow} onPress={toggleRemember} disabled={submitting} accessibilityRole="checkbox" accessibilityState={{ checked: remember }}>
               <View style={[styles.checkbox, remember && styles.checkboxOn]}>
@@ -199,10 +211,12 @@ const styles = StyleSheet.create({
   field: { gap: 10 },
   label: { fontFamily: Font.manrope.bold, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
   input: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: Palette.card, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 12, paddingHorizontal: 18, paddingVertical: 16,
-    fontFamily: Font.manrope.medium, fontSize: 15, color: '#fff',
   },
+  inputText: { flex: 1, padding: 0, fontFamily: Font.manrope.medium, fontSize: 15, color: '#fff' },
+  clear: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
   inputFailed: { borderColor: Palette.danger },
   pinRow: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
   pinBox: {
