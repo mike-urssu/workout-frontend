@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Clock, History, Menu, Plus, Sparkles, X } from 'lucide-react-native';
+import { Clock, History, Plus, Sparkles, X } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -9,10 +9,10 @@ import {
 } from '@/api/workout';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
-import { Sheet } from '@/components/sheet';
+import { RoutineButton, RoutineSheet } from '@/components/routine-sheet';
 import { SwipeBack } from '@/components/swipe-back';
 import { Font, Palette } from '@/constants/theme';
-import { clockSec, elapsed, kg } from '@/data/workout';
+import { clockSec, elapsed } from '@/data/workout';
 import { useElapsed } from '@/hooks/use-elapsed';
 import { confirm, errorMessage, notify } from '@/lib/dialog';
 
@@ -218,23 +218,18 @@ export default function RecordScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable
-          style={styles.routineBtn}
-          onPress={async () => {
+        <RoutineButton
+          onOpen={async () => {
             try {
-              const s = await getInProgress(); // fresh numbers for the other exercises
-              if (s) setSession(s);
+              const next = await getInProgress(); // fresh numbers for the other exercises
+              if (next) setSession(next);
             } catch {}
             setRoutineOpen(true);
-          }}>
-          <Menu size={18} color="rgba(255,255,255,0.7)" />
-          <Text style={styles.routineText}>오늘의 루틴 보기</Text>
-        </Pressable>
+          }}
+        />
       </View>
 
-      {session && (
-        <RoutineSheet session={session} currentId={sessionExerciseId} visible={routineOpen} onClose={() => setRoutineOpen(false)} />
-      )}
+      <RoutineSheet session={session} currentId={sessionExerciseId} visible={routineOpen} onClose={() => setRoutineOpen(false)} />
       </SwipeBack>
     </Screen>
   );
@@ -262,43 +257,6 @@ function NumberInput({ value, onCommit, decimal, invalid }: { value: number | nu
       }}
       onChangeText={(t) => setText(t.replace(decimal ? /[^0-9.]/g : /[^0-9]/g, ''))}
     />
-  );
-}
-
-function RoutineSheet({ session, currentId, visible, onClose }: { session: Session; currentId: string; visible: boolean; onClose: () => void }) {
-  const items = session.exercises.filter((e) => e.setCount > 0 || e.sessionExerciseId === currentId);
-  return (
-    <Sheet visible={visible} onClose={onClose} maxHeight="80%">
-      <Text style={styles.sheetTitle}>오늘의 루틴</Text>
-      <Text style={styles.sheetSub}>진행 중인 운동 목록</Text>
-      <ScrollView style={{ marginTop: 8 }}>
-        {items.map((e, i) => {
-          const current = e.sessionExerciseId === currentId;
-          return (
-            <View key={e.sessionExerciseId} style={[styles.rtRow, i > 0 && styles.rtDivider]}>
-              <View style={styles.rtLeft}>
-                <View style={[styles.bar, current && styles.barActive]} />
-                <View style={{ gap: 4 }}>
-                  <View style={styles.rtTitle}>
-                    <Text style={styles.rtName}>{e.name}</Text>
-                    <View style={styles.tag}>
-                      <Text style={styles.tagText}>{e.category.name}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.rtTime}>{e.firstSetAt ? clockSec(toMs(e.firstSetAt)) : ''}</Text>
-                </View>
-              </View>
-              <Text style={[styles.rtStatus, current && { color: Palette.accent }]}>
-                {current ? '진행 중' : `${e.setCount}세트 완료`}
-              </Text>
-            </View>
-          );
-        })}
-      </ScrollView>
-      <Text style={styles.rtFooter}>
-        {`총 ${session.summary.exerciseCount}개 종목 · ${kg(session.summary.totalVolume)}kg · ${session.summary.totalSets}세트`}
-      </Text>
-    </Sheet>
   );
 }
 
@@ -354,24 +312,5 @@ const styles = StyleSheet.create({
   },
   addSetText: { fontFamily: Font.manrope.bold, fontSize: 14, color: Palette.accent },
   footer: { paddingHorizontal: 24, paddingVertical: 16 },
-  routineBtn: {
-    height: 44, borderRadius: 100, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-  },
-  routineText: { fontFamily: Font.outfit.bold, fontSize: 14, color: 'rgba(255,255,255,0.7)' },
 
-  sheetTitle: { fontFamily: Font.outfit.extrabold, fontSize: 22, color: '#fff' },
-  sheetSub: { fontFamily: Font.manrope.regular, fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 6 },
-  rtRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16 },
-  rtDivider: { borderTopWidth: 1, borderTopColor: Palette.border },
-  rtLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  bar: { width: 4, height: 36 },
-  barActive: { backgroundColor: Palette.accent, borderRadius: 2 },
-  rtTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rtName: { fontFamily: Font.outfit.semibold, fontSize: 15, color: '#fff' },
-  tag: { backgroundColor: Palette.border, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  tagText: { fontFamily: Font.manrope.medium, fontSize: 11, color: 'rgba(255,255,255,0.6)' },
-  rtTime: { fontFamily: Font.manrope.regular, fontSize: 12, color: 'rgba(255,255,255,0.4)' },
-  rtStatus: { fontFamily: Font.manrope.semibold, fontSize: 13, color: 'rgba(255,255,255,0.5)' },
-  rtFooter: { fontFamily: Font.manrope.semibold, fontSize: 13, color: 'rgba(255,255,255,0.6)', paddingTop: 16 },
 });
