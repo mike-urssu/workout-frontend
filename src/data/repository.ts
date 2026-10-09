@@ -1,11 +1,10 @@
-// Local-storage backed data layer. Swap these functions for API calls later;
-// screens only talk to `repo`.
+// Local-storage backed dummy history (statistics only; everything else uses src/api/workout.ts).
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { MuscleGroupId, exercisesOf } from './catalog';
-import { Media, Session, clock, doneSets } from './workout';
+import { Session, clock } from './workout';
 
-const KEYS = { active: 'workout.active', history: 'workout.history', seeded: 'workout.seeded' };
+const KEYS = { history: 'workout.history', seeded: 'workout.seeded' };
 
 async function read<T>(key: string, fallback: T): Promise<T> {
   const raw = await AsyncStorage.getItem(key);
@@ -48,30 +47,10 @@ function ensureSeeded() {
   return seeding;
 }
 
+// Only the statistics screen still reads this: there is no stats API yet (dummy September 2026 history).
 export const repo = {
   async getHistory(): Promise<Session[]> {
     await ensureSeeded();
     return read<Session[]>(KEYS.history, []);
   },
-  getActive: () => read<Session | null>(KEYS.active, null),
-  saveActive: (session: Session) => write(KEYS.active, session),
-
-  async startSession(): Promise<Session> {
-    const session: Session = { id: String(Date.now()), startedAt: Date.now(), exercises: [], media: [] };
-    await write(KEYS.active, session);
-    return session;
-  },
-
-  /** Finishes the active session and moves it into history (dropped if nothing was recorded). */
-  async endSession(media: Media[] = []) {
-    const active = await read<Session | null>(KEYS.active, null);
-    if (!active) return;
-    const exercises = active.exercises.filter((e) => doneSets(e).length);
-    if (exercises.length) {
-      const history = await this.getHistory();
-      await write(KEYS.history, [...history, { ...active, exercises, media, endedAt: Date.now() }]);
-    }
-    await AsyncStorage.removeItem(KEYS.active);
-  },
 };
-

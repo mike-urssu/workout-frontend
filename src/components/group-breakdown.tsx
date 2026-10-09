@@ -2,29 +2,22 @@ import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { GROUPS, exerciseById } from '@/data/catalog';
+import { Breakdown } from '@/api/workout';
 import { Font, Palette } from '@/constants/theme';
-import {
-  SessionExercise, doneSets, exerciseVolume, groupOf, kg, totalSets, totalVolume,
-} from '@/data/workout';
+import { kg } from '@/data/workout';
 
 /** Per muscle group card: collapsed = exercise summary rows, expanded = every set. */
-export function GroupBreakdown({ exercises, bg }: { exercises: SessionExercise[]; bg: string }) {
-  const groups = GROUPS.map((g) => ({
-    g,
-    items: exercises.filter((e) => groupOf(e) === g.id && doneSets(e).length),
-  })).filter((x) => x.items.length);
-
+export function GroupBreakdown({ groups, bg }: { groups: Breakdown; bg: string }) {
   return (
     <View style={styles.list}>
-      {groups.map(({ g, items }) => (
-        <GroupCard key={g.id} name={g.name} items={items} bg={bg} />
+      {groups.map((g) => (
+        <GroupCard key={g.id} group={g} bg={bg} />
       ))}
     </View>
   );
 }
 
-function GroupCard({ name, items, bg }: { name: string; items: SessionExercise[]; bg: string }) {
+function GroupCard({ group, bg }: { group: Breakdown[number]; bg: string }) {
   const [open, setOpen] = useState(false);
   const Chevron = open ? ChevronUp : ChevronDown;
 
@@ -32,20 +25,20 @@ function GroupCard({ name, items, bg }: { name: string; items: SessionExercise[]
     <View style={[styles.card, { backgroundColor: bg }]}>
       <Pressable style={styles.header} onPress={() => setOpen(!open)}>
         <View style={{ gap: 2 }}>
-          <Text style={styles.groupName}>{name}</Text>
-          <Text style={styles.summary}>{`${kg(totalVolume(items))}kg · ${totalSets(items)}세트`}</Text>
+          <Text style={styles.groupName}>{group.name}</Text>
+          <Text style={styles.summary}>{`${kg(group.volume)}kg · ${group.setCount}세트`}</Text>
         </View>
         <Chevron size={16} color="rgba(255,255,255,0.8)" />
       </Pressable>
-      {items.map((e) => (
-        <View key={e.exerciseId} style={[styles.exercise, open && styles.divided]}>
+      {group.exercises.map((e) => (
+        <View key={e.key} style={[styles.exercise, open && styles.divided]}>
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseName}>{exerciseById(e.exerciseId).name}</Text>
-            <Text style={styles.summary}>{`${kg(exerciseVolume(e))}kg · ${doneSets(e).length}세트`}</Text>
+            <Text style={styles.exerciseName}>{e.name}</Text>
+            <Text style={styles.summary}>{`${kg(e.volume)}kg · ${e.setCount}세트`}</Text>
           </View>
           {open &&
-            doneSets(e).map((s, i) => (
-              <Text key={s.id} style={styles.setLine}>{`${i + 1}세트 ${s.weight ?? 0}kg × ${s.reps}회`}</Text>
+            e.sets.map((s, i) => (
+              <Text key={i} style={styles.setLine}>{`${i + 1}세트 ${s.weight}kg × ${s.repetitions}회`}</Text>
             ))}
         </View>
       ))}

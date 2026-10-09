@@ -1,45 +1,65 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ExerciseItem, getExercises, openExercise } from '@/api/workout';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { Font, Palette } from '@/constants/theme';
-import { exercisesOf, groupById } from '@/data/catalog';
-import { daysAgoText, lastRecord } from '@/data/workout';
-import { useWorkoutData } from '@/hooks/use-workout-data';
+import { daysAgoText } from '@/data/workout';
+import { useCategories } from '@/hooks/use-categories';
+import { errorMessage, notify } from '@/lib/dialog';
 
 export default function ExerciseListScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const group = groupById(id);
-  const { history } = useWorkoutData();
+  const { id } = useLocalSearchParams<{ id: string }>(); // category id
+  const name = useCategories().find((c) => c.id === id)?.name ?? '';
+  const [items, setItems] = useState<ExerciseItem[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  // Reload on focus so "최근 N일 전 완료" reflects what was just finished.
+  useFocusEffect(
+    useCallback(() => {
+      getExercises(id).then(setItems).catch((e) => notify(errorMessage(e)));
+    }, [id]),
+  );
+
+  const open = async (ex: ExerciseItem) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { sessionId, sessionExerciseId } = await openExercise(ex.id);
+      router.push({ pathname: '/record/[id]', params: { id: ex.id, sessionId, sessionExerciseId, categoryId: id } });
+    } catch (e) {
+      notify(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <Screen>
-      <ScreenHeader title={`${group.name} 운동`} subtitle={`${group.name} 근육 발달을 위한 추천 루틴`} />
+      <ScreenHeader title={`${name} 운동`} subtitle={`${name} 근육 발달을 위한 운동`} />
       <ScrollView contentContainerStyle={styles.list}>
-        {exercisesOf(id).map((ex) => {
-          const last = lastRecord(history, ex.id);
-          return (
-            <Pressable key={ex.id} style={styles.row} onPress={() => router.push(`/record/${ex.id}`)}>
-              <View style={styles.details}>
-                <Text style={styles.name}>{ex.name}</Text>
-                <View style={styles.sub}>
-                  <Text style={styles.en}>{ex.en}</Text>
-                  <View style={styles.dot} />
-                  {last ? (
-                    <Text style={styles.recent}>{`최근 ${daysAgoText(last.session.startedAt)} 완료`}</Text>
-                  ) : (
-                    <Text style={styles.en}>기록 없음</Text>
-                  )}
-                </View>
+        {items.map((ex) => (
+          <Pressable key={ex.id} style={styles.row} onPress={() => open(ex)} disabled={busy}>
+            <View style={styles.details}>
+              <Text style={styles.name}>{ex.name}</Text>
+              <View style={styles.sub}>
+                <Text style={styles.en}>{ex.nameEn}</Text>
+                <View style={styles.dot} />
+                {ex.lastPerformedDate ? (
+                  <Text style={styles.recent}>{`최근 ${daysAgoText(Date.parse(`${ex.lastPerformedDate}T00:00:00`))} 완료`}</Text>
+                ) : (
+                  <Text style={styles.en}>기록 없음</Text>
+                )}
               </View>
-              <View style={styles.chevron}>
-                <ChevronRight size={16} color="#fff" />
-              </View>
-            </Pressable>
-          );
-        })}
+            </View>
+            <View style={styles.chevron}>
+              <ChevronRight size={16} color="#fff" />
+            </View>
+          </Pressable>
+        ))}
       </ScrollView>
     </Screen>
   );

@@ -1,45 +1,85 @@
 import { Image } from 'expo-image';
+import { useFocusEffect } from 'expo-router';
 import { Camera, ChevronLeft, ChevronRight, Play } from 'lucide-react-native';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ApiError } from '@/api/client';
+import { Day, MediaItem, Month, dayBreakdown, deleteDay, getDay, getMonth } from '@/api/workout';
 import { GroupBreakdown } from '@/components/group-breakdown';
 import { MediaViewer } from '@/components/media-viewer';
 import { Screen } from '@/components/screen';
 import { Font, Palette } from '@/constants/theme';
-import { GROUPS } from '@/data/catalog';
-import {
-  Session, WEEKDAY_LABELS, dateKey, durationSec, groupOf, kg, minSec, totalVolume, weekday,
-} from '@/data/workout';
-import { useWorkoutData } from '@/hooks/use-workout-data';
+import { WEEKDAY_LABELS, kg, minSec, weekday } from '@/data/workout';
+import { useFileSource } from '@/hooks/use-file-source';
+import { styleOf } from '@/hooks/use-categories';
+import { confirm, errorMessage, notify } from '@/lib/dialog';
 
 const pad = (n: number) => String(n).padStart(2, '0');
+const ym = (y: number, m: number) => `${y}-${pad(m + 1)}`;
 
 export default function HistoryScreen() {
-  const { history, loaded } = useWorkoutData();
-  const [pickedMonth, setMonth] = useState<{ y: number; m: number } | null>(null);
-  const [pickedDay, setSelected] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [month, setMonth] = useState<{ y: number; m: number }>(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
+  const [monthData, setMonthData] = useState<Month | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [day, setDay] = useState<Day | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);
-  const [today] = useState(() => Date.now());
 
-  // Until the user navigates, open on the latest recorded day (falls back to today).
-  const latest = new Date(history.reduce((m, s) => Math.max(m, s.startedAt), 0) || today);
-  const month = pickedMonth ?? { y: latest.getFullYear(), m: latest.getMonth() };
-  const selected = pickedDay ?? dateKey(latest.getTime());
+  const loadDay = useCallback(async (date: string | null) => {
+    setSelected(date);
+    setDay(null);
+    if (!date) return;
+    try {
+      setDay(await getDay(date));
+    } catch (e) {
+      notify(errorMessage(e));
+    }
+  }, []);
 
-  if (!loaded) return <Screen><View /></Screen>;
+  /** Loads a month (no argument = the server picks the latest recorded month) and selects its latest day. */
+  const loadMonth = useCallback(async (target?: string) => {
+    try {
+      const data = await getMonth(target);
+      setMonthData(data);
+      if (data.month) {
+        const [y, m] = data.month.split('-').map(Number);
+        setMonth({ y, m: m - 1 });
+      }
+      // On the first load open the latest day; when paging months keep the selection empty.
+      await loadDay(target ? null : data.latestDate);
+    } catch (e) {
+      setMonthData(null);
+      notify(errorMessage(e));
+    }
+    setLoaded(true);
+  }, [loadDay]);
 
-  const byDay = new Map<string, Session[]>();
-  for (const s of history) {
-    const k = dateKey(s.startedAt);
-    byDay.set(k, [...(byDay.get(k) ?? []), s]);
-  }
+  useFocusEffect(
+    useCallback(() => {
+      loadMonth();
+    }, [loadMonth]),
+  );
 
   const shift = (delta: number) => {
     const d = new Date(month.y, month.m + delta, 1);
     setMonth({ y: d.getFullYear(), m: d.getMonth() });
+    loadMonth(ym(d.getFullYear(), d.getMonth()));
   };
 
+  const remove = async () => {
+    if (!selected || !(await confirm('이 날의 기록을 삭제할까요?', '삭제', '운동 기록과 사진·동영상이 모두 삭제돼요.'))) return;
+    try {
+      await deleteDay(selected);
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.code !== 'WORKOUT_DAY_NOT_FOUND') return notify(errorMessage(e));
+    }
+    await loadMonth(ym(month.y, month.m));
+  };
+
+  if (!loaded) return <Screen><View /></Screen>;
+
+  const byDay = new Map((monthData?.days ?? []).map((d) => [d.date, d.categories]));
   const firstDow = new Date(month.y, month.m, 1).getDay();
   const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
   const cells: (number | null)[] = [
@@ -49,12 +89,8 @@ export default function HistoryScreen() {
   while (cells.length % 7) cells.push(null);
   const weeks = Array.from({ length: cells.length / 7 }, (_, w) => cells.slice(w * 7, w * 7 + 7));
 
-  // ponytail: several sessions on one day are shown merged; split per session if that matters.
-  const daySessions = byDay.get(selected) ?? [];
-  const exercises = daySessions.flatMap((s) => s.exercises);
-  const media = daySessions.flatMap((s) => s.media);
-  const seconds = daySessions.reduce((sum, s) => sum + durationSec(s), 0);
-  const selDate = new Date(`${selected}T00:00:00`);
+  const media = day?.media ?? [];
+  const selDate = new Date(`${selected ?? ym(month.y, month.m) + '-01'}T00:00:00`);
 
   return (
     <Screen>
@@ -77,15 +113,14 @@ export default function HistoryScreen() {
             <View key={wi}>
               {wi > 0 && <View style={styles.weekSep} />}
               <View style={styles.week}>
-                {week.map((day, di) => {
-                  if (!day) return <View key={di} style={styles.day} />;
-                  const key = `${month.y}-${pad(month.m + 1)}-${pad(day)}`;
-                  const groups = GROUPS.filter((g) => byDay.get(key)?.some((s) => s.exercises.some((e) => groupOf(e) === g.id)));
+                {week.map((d, di) => {
+                  if (!d) return <View key={di} style={styles.day} />;
+                  const key = `${ym(month.y, month.m)}-${pad(d)}`;
                   const isSel = key === selected;
                   return (
-                    <Pressable key={di} style={[styles.day, isSel && styles.daySel]} onPress={() => setSelected(key)}>
-                      <Text style={[styles.dayNum, isSel && styles.dayNumSel]}>{day}</Text>
-                      {groups.map((g) => <Text key={g.id} style={[styles.dayGroup, { color: g.color }]}>{g.name}</Text>)}
+                    <Pressable key={di} style={[styles.day, isSel && styles.daySel]} onPress={() => loadDay(key)}>
+                      <Text style={[styles.dayNum, isSel && styles.dayNumSel]}>{d}</Text>
+                      {byDay.get(key)?.map((c) => <Text key={c.id} style={[styles.dayGroup, { color: styleOf(c.name)?.color }]}>{c.name}</Text>)}
                     </Pressable>
                   );
                 })}
@@ -100,19 +135,22 @@ export default function HistoryScreen() {
               <Text style={styles.dayTitle}>{`${selDate.getMonth() + 1}월 ${selDate.getDate()}일 (${weekday(selDate)})`}</Text>
               <Text style={styles.subtitle}>선택한 날짜의 세션 기록</Text>
             </View>
-            {seconds > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{minSec(seconds)}</Text></View>}
+            {day && day.durationSeconds > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{minSec(day.durationSeconds)}</Text></View>}
           </View>
 
-          {exercises.length === 0 ? (
+          {!day ? (
             <Text style={styles.empty}>이 날의 운동 기록이 없어요</Text>
           ) : (
             <>
               <View style={styles.divider} />
               <View style={styles.volume}>
                 <Text style={styles.volumeLabel}>총 볼륨</Text>
-                <Text style={styles.volumeValue}>{`${kg(totalVolume(exercises))} kg`}</Text>
+                <Text style={styles.volumeValue}>{`${kg(day.summary.totalVolume)} kg`}</Text>
               </View>
-              <GroupBreakdown exercises={exercises} bg={Palette.surface} />
+              <GroupBreakdown groups={dayBreakdown(day)} bg={Palette.surface} />
+              <Pressable onPress={remove} hitSlop={8} style={styles.remove}>
+                <Text style={styles.removeText}>이 날의 기록 삭제</Text>
+              </Pressable>
             </>
           )}
         </View>
@@ -125,13 +163,7 @@ export default function HistoryScreen() {
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {media.map((m, i) => (
-                <Pressable key={`${m.uri}${i}`} style={styles.thumb} onPress={() => setViewer(i)}>
-                  {m.type === 'image' ? (
-                    <Image source={{ uri: m.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                  ) : (
-                    <View style={styles.play}><Play size={12} color="#fff" /></View>
-                  )}
-                </Pressable>
+                <Thumb key={m.id} item={m} onPress={() => setViewer(i)} />
               ))}
             </ScrollView>
           </View>
@@ -140,6 +172,16 @@ export default function HistoryScreen() {
 
       <MediaViewer media={media} startIndex={viewer ?? 0} visible={viewer !== null} onClose={() => setViewer(null)} />
     </Screen>
+  );
+}
+
+function Thumb({ item, onPress }: { item: MediaItem; onPress: () => void }) {
+  const source = useFileSource(item.previewUrl);
+  return (
+    <Pressable style={styles.thumb} onPress={onPress}>
+      {source && <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />}
+      {item.mediaType === 'VIDEO' && <View style={styles.play}><Play size={12} color="#fff" /></View>}
+    </Pressable>
   );
 }
 
@@ -171,6 +213,8 @@ const styles = StyleSheet.create({
   dayTitle: { fontFamily: Font.outfit.extrabold, fontSize: 20, color: '#fff' },
   badge: { backgroundColor: 'rgba(178,224,0,0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   badgeText: { fontFamily: Font.manrope.bold, fontSize: 12, color: Palette.accent },
+  remove: { alignSelf: 'flex-end' },
+  removeText: { fontFamily: Font.manrope.semibold, fontSize: 12, color: Palette.danger },
   empty: { fontFamily: Font.manrope.regular, fontSize: 13, color: Palette.dim },
   divider: { height: 1, backgroundColor: Palette.border },
   volume: { backgroundColor: '#26262b', borderWidth: 1, borderColor: Palette.border, borderRadius: 16, padding: 16, gap: 4 },

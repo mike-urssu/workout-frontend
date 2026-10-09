@@ -6,16 +6,17 @@ import { FlatList, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Font, Palette } from '@/constants/theme';
-import { Media } from '@/data/workout';
+import { MediaItem } from '@/api/workout';
+import { useFileSource } from '@/hooks/use-file-source';
 
-type Props = { media: Media[]; startIndex: number; visible: boolean; onClose: () => void };
+type Props = { media: MediaItem[]; startIndex: number; visible: boolean; onClose: () => void };
 
 /** Full-screen swipeable viewer for the "오운완 인증" photos/videos. */
 export function MediaViewer({ media, startIndex, visible, onClose }: Props) {
   const { width } = useWindowDimensions();
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(startIndex);
-  const list = useRef<FlatList<Media>>(null);
+  const list = useRef<FlatList<MediaItem>>(null);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => {
@@ -40,13 +41,13 @@ export function MediaViewer({ media, startIndex, visible, onClose }: Props) {
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            keyExtractor={(m, i) => `${m.uri}${i}`}
+            keyExtractor={(m) => m.id}
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
             onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
             renderItem={({ item, index: i }) => (
               <View style={{ width, alignItems: 'center' }}>
                 <View style={styles.frame}>
-                  {item.type === 'video' ? <Video uri={item.uri} active={visible && i === index} /> : <Image source={{ uri: item.uri }} style={styles.fill} contentFit="cover" />}
+                  <Item item={item} active={visible && i === index} />
                 </View>
               </View>
             )}
@@ -63,8 +64,15 @@ export function MediaViewer({ media, startIndex, visible, onClose }: Props) {
   );
 }
 
-function Video({ uri, active }: { uri: string; active: boolean }) {
-  const player = useVideoPlayer(uri, (p) => { p.loop = true; });
+function Item({ item, active }: { item: MediaItem; active: boolean }) {
+  const original = useFileSource(item.originalUrl);
+  const preview = useFileSource(item.previewUrl);
+  if (item.mediaType === 'VIDEO') return original ? <Video source={original} active={active} /> : null;
+  return <Image source={original ?? preview} placeholder={preview ?? undefined} style={styles.fill} contentFit="cover" />;
+}
+
+function Video({ source, active }: { source: { uri: string; headers?: Record<string, string> }; active: boolean }) {
+  const player = useVideoPlayer(source, (p) => { p.loop = true; });
   if (active) player.play(); else player.pause();
   return <VideoView player={player} style={styles.fill} contentFit="cover" nativeControls />;
 }

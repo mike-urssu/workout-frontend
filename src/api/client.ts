@@ -1,8 +1,9 @@
 import * as SecureStore from 'expo-secure-store';
+import { router } from 'expo-router';
 import { Platform } from 'react-native';
 
 // Dev: set EXPO_PUBLIC_API_URL (e.g. http://<LAN-IP>:8080) in .env
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://workout-api.jjoon.cloud';
+export const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://workout-api.jjoon.cloud';
 const TOKEN_KEY = 'auth.token';
 
 /** Login token lives in the device's secure storage (NFR-SEC-003). Web has no secure store: localStorage (dev only). */
@@ -30,24 +31,47 @@ export class ApiError extends Error {
   }
 }
 
-/** JSON request; sends the stored token when there is one. 2xx without a body resolves to undefined. */
-export async function request<T = void>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+type Init = { method?: string; body?: unknown; headers?: Record<string, string> };
+
+/** Session codes that mean "log in again" (auth design 4.2); any other 401 is handled by the caller. */
+const SESSION_CODES = ['AUTH_SESSION_EXPIRED', 'AUTH_SESSION_REPLACED', 'AUTH_SESSION_REVOKED', 'UNAUTHORIZED'];
+
+/**
+ * JSON (or FormData) request; sends the stored token when there is one. 2xx without a body resolves to undefined.
+ * A 401 on an authenticated call clears the token and goes back to the login screen with the reason.
+ */
+export async function request<T = void>(path: string, init: Init = {}): Promise<T> {
   const token = await tokenStore.get();
+  const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       method: init.method ?? 'GET',
       headers: {
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init.body && !isForm ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
       },
-      body: init.body ? JSON.stringify(init.body) : undefined,
+      body: init.body ? (isForm ? (init.body as FormData) : JSON.stringify(init.body)) : undefined,
     });
   } catch {
     throw new ApiError(0, 'NETWORK_ERROR', '네트워크 연결을 확인해 주세요.');
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) throw new ApiError(res.status, data?.code ?? 'UNKNOWN', data?.message ?? '요청에 실패했습니다.', data?.details);
+  if (!res.ok) {
+    const err = new ApiError(res.status, data?.code ?? 'UNKNOWN', data?.message ?? '요청에 실패했습니다.', data?.details);
+    if (res.status === 401 && token && SESSION_CODES.includes(err.code) && !path.startsWith('/api/v1/auth/')) {
+      await tokenStore.clear();
+      router.replace({ pathname: '/', params: { reason: err.code } });
+    }
+    throw err;
+  }
   return data as T;
+}
+
+/** Headers for loading protected files (photos/videos) outside `request`. */
+export async function authHeaders(): Promise<Record<string, string>> {
+  const token = await tokenStore.get();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }

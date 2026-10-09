@@ -3,102 +3,141 @@ import { Clock, History, Menu, Plus, Sparkles, X } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { ApiError } from '@/api/client';
+import {
+  LastRecord, Session, SessionExercise, addSet, clearSets, deleteSet, getInProgress, getLastRecord, toMs, updateSet,
+} from '@/api/workout';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { Sheet } from '@/components/sheet';
 import { Font, Palette } from '@/constants/theme';
-import { exerciseById, groupById } from '@/data/catalog';
-import { repo } from '@/data/repository';
-import {
-  Session, SetEntry, clock, doneSets, elapsed, isDone, kg, lastRecord, totalSets, totalVolume,
-} from '@/data/workout';
+import { clock, elapsed, kg } from '@/data/workout';
 import { useElapsed } from '@/hooks/use-elapsed';
-import { useWorkoutData } from '@/hooks/use-workout-data';
+import { confirm, errorMessage, notify } from '@/lib/dialog';
 
-const nowClock = () => clock(Date.now());
-const newSet = (weight: number | null): SetEntry => ({
-  id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-  weight,
-  reps: null,
-  time: nowClock(),
+/** One table row. `id` = saved on the server; no id = still a draft (or a not-yet-applied previous value). */
+type Row = {
+  key: string; id?: string; weight: number | null; reps: number | null; time: string;
+  prefilled?: boolean; saving?: boolean; invalid?: boolean;
+  /** last values the server has, to skip a PUT when nothing changed */
+  saved?: { weight: number; reps: number };
+};
+
+let draftSeq = 0;
+const draft = (weight: number | null, over: Partial<Row> = {}): Row => ({ key: `draft-${draftSeq++}`, weight, reps: null, time: '', ...over });
+const fromServer = (s: SessionExercise['sets'][number]): Row => ({
+  key: s.id, id: s.id, weight: s.weight, reps: s.repetitions, time: clock(toMs(s.createdAt)),
+  saved: { weight: s.weight, reps: s.repetitions },
 });
+// Client-side copy of the server rules (BR-003, BR-005); the server checks again.
+const validWeight = (w: number) => w >= 0 && w <= 1000 && Math.abs(w * 100 - Math.round(w * 100)) < 1e-6;
+const validReps = (r: number) => Number.isInteger(r) && r >= 1 && r <= 1000;
 
 export default function RecordScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const ex = exerciseById(id);
-  const group = groupById(ex.group);
-  const { history } = useWorkoutData();
+  const { id, sessionId, sessionExerciseId, categoryId } = useLocalSearchParams<{
+    id: string; sessionId: string; sessionExerciseId: string; categoryId: string;
+  }>();
   const [session, setSession] = useState<Session | null>(null);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [prev, setPrev] = useState<LastRecord | null>(null);
   const [loadedPrev, setLoadedPrev] = useState(false);
   const [routineOpen, setRoutineOpen] = useState(false);
-  const seconds = useElapsed(session?.startedAt);
+  const seconds = useElapsed(session ? toMs(session.startedAt) : undefined);
 
-  // Recording needs a session: join the active one or start it, and make sure this exercise is in it.
+  const ex = session?.exercises.find((e) => e.sessionExerciseId === sessionExerciseId);
+  const backToList = () => router.navigate(`/group/${categoryId ?? ex?.category.id}`);
+
+  /** Failures that mean this screen can no longer be used (design 4.2 EX-002). */
+  const fail = (e: unknown) => {
+    notify(errorMessage(e));
+    if (!(e instanceof ApiError)) return;
+    if (e.code === 'SESSION_EXERCISE_NOT_FOUND') backToList();
+    else if (['WORKOUT_SESSION_NOT_EDITABLE', 'WORKOUT_SESSION_ALREADY_COMPLETED', 'WORKOUT_SESSION_NOT_FOUND'].includes(e.code)) router.replace('/home');
+  };
+
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        let s = (await repo.getActive()) ?? (await repo.startSession());
-        if (!s.exercises.some((e) => e.exerciseId === id)) {
-          s = { ...s, exercises: [...s.exercises, { exerciseId: id, sets: [newSet(null)] }] };
-          await repo.saveActive(s);
+        try {
+          const s = await getInProgress();
+          const mine = s?.id === sessionId ? s.exercises.find((e) => e.sessionExerciseId === sessionExerciseId) : undefined;
+          if (!s || !mine) return fail(new ApiError(404, 'WORKOUT_SESSION_NOT_FOUND', '진행 중인 운동을 찾을 수 없어요.'));
+          setSession(s);
+          setRows(mine.sets.length ? mine.sets.map(fromServer) : [draft(null)]);
+          setLoadedPrev(false);
+          setPrev(await getLastRecord(id));
+        } catch (e) {
+          fail(e);
         }
-        setSession(s);
-        setLoadedPrev(false);
       })();
-    }, [id]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id, sessionId, sessionExerciseId]),
   );
 
-  const sets = session?.exercises.find((e) => e.exerciseId === id)?.sets ?? [];
-  const prev = lastRecord(history, id);
-  const hasPrefilled = sets.some((s) => s.prefilled);
+  const patch = (key: string, p: Partial<Row>) => setRows((all) => all.map((r) => (r.key === key ? { ...r, ...p } : r)));
 
-  const updateSets = (fn: (sets: SetEntry[]) => SetEntry[]) => {
-    if (!session) return;
-    const next = {
-      ...session,
-      exercises: session.exercises.map((e) => (e.exerciseId === id ? { ...e, sets: fn(e.sets) } : e)),
-    };
-    setSession(next);
-    repo.saveActive(next);
+  /** Saves a row once both values are there: POST for a new set, PUT for an edited one. */
+  const commit = async (key: string, p: Partial<Row>) => {
+    const row = { ...rows.find((r) => r.key === key)!, ...p };
+    patch(key, p);
+    if (row.weight === null || row.reps === null || row.saving) return;
+    if (!validWeight(row.weight) || !validReps(row.reps)) return patch(key, { invalid: true });
+    if (row.saved && row.saved.weight === row.weight && row.saved.reps === row.reps) return patch(key, { invalid: false });
+    patch(key, { saving: true, invalid: false });
+    try {
+      const saved = row.id
+        ? await updateSet(sessionId, sessionExerciseId, row.id, row.weight, row.reps)
+        : await addSet(sessionId, sessionExerciseId, row.weight, row.reps);
+      // ponytail: edits made while this request is in flight are not saved; blur again to save them
+      patch(key, { id: saved.id, time: clock(toMs(saved.createdAt)), prefilled: false, saving: false, saved: { weight: saved.weight, reps: saved.repetitions } });
+    } catch (e) {
+      patch(key, { saving: false, invalid: e instanceof ApiError && e.code === 'VALIDATION_FAILED' });
+      fail(e);
+    }
   };
-  const patch = (setId: string, p: Partial<SetEntry>) =>
-    updateSets((all) => all.map((s) => (s.id === setId ? { ...s, ...p } : s)));
 
-  const loadPrev = () => {
+  const remove = async (row: Row) => {
+    try {
+      if (row.id) await deleteSet(sessionId, sessionExerciseId, row.id);
+      setRows((all) => (all.length > 1 ? all.filter((r) => r.key !== row.key) : [draft(null)]));
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const addRow = () => setRows((all) => [...all, draft(all[all.length - 1]?.weight ?? null)]);
+
+  /** BR-021: loading replaces the sets of this exercise; saved sets are deleted after a confirmation. */
+  const loadPrev = async () => {
     if (!prev) return;
-    updateSets((all) => [
-      ...all.filter((s) => s.weight !== null || s.reps !== null),
-      ...prev.sets.map((s, i) => ({
-        id: `${Date.now()}-prev${i}`, weight: s.weight, reps: s.reps, time: '', prefilled: true,
-      })),
-    ]);
+    const hasSaved = rows.some((r) => r.id);
+    if (hasSaved && !(await confirm('이전 기록으로 덮어쓸까요?', '덮어쓰기', '지금 기록한 세트가 모두 삭제돼요.'))) return;
+    try {
+      if (hasSaved) await clearSets(sessionId, sessionExerciseId);
+    } catch (e) {
+      return fail(e);
+    }
+    setRows(prev.sets.map((s) => draft(s.weight, { reps: s.repetitions, prefilled: true })));
     setLoadedPrev(true);
   };
 
-  const confirm = (setId: string) => patch(setId, { prefilled: false, time: nowClock() });
-  const addSet = () => updateSets((all) => [...all, newSet(all[all.length - 1]?.weight ?? null)]);
-  const remove = (setId: string) => updateSets((all) => all.filter((s) => s.id !== setId));
-
-  const prevDate = prev ? new Date(prev.session.startedAt) : null;
+  const hasPrefilled = rows.some((r) => r.prefilled);
+  const prevDate = prev ? new Date(`${prev.performedDate}T00:00:00`) : null;
 
   return (
     <Screen>
       <ScreenHeader
-        title={ex.name}
-        subtitle={`${group.name} • ${ex.target}`}
+        title={ex?.name ?? ''}
+        subtitle={ex ? `${ex.category.name} • ${ex.target}` : ''}
         // Tabs' back goes to the first tab (home); we want this exercise's list instead.
-        onBack={() => router.navigate(`/group/${ex.group}`)}
+        onBack={backToList}
         right={
-          loadedPrev ? (
-            <View style={[styles.prevBtn, styles.prevBtnLoaded]}>
-              <History size={12} color={Palette.accent} />
-              <Text style={[styles.prevText, { color: Palette.accent, fontFamily: Font.manrope.bold }]}>불러오기 완료</Text>
-            </View>
-          ) : (
-            <Pressable style={[styles.prevBtn, !prev && { opacity: 0.4 }]} onPress={loadPrev} disabled={!prev}>
-              <Text style={styles.prevText}>{prev ? '이전 기록 불러오기' : '이전 기록 없음'}</Text>
-            </Pressable>
-          )
+          <Pressable style={[styles.prevBtn, loadedPrev && styles.prevBtnLoaded, !prev && { opacity: 0.4 }]} onPress={loadPrev} disabled={!prev}>
+            {loadedPrev && <History size={12} color={Palette.accent} />}
+            <Text style={[styles.prevText, loadedPrev && { color: Palette.accent, fontFamily: Font.manrope.bold }]}>
+              {!prev ? '이전 기록 없음' : loadedPrev ? '다시 불러오기' : '이전 기록 불러오기'}
+            </Text>
+          </Pressable>
         }
       />
 
@@ -132,116 +171,122 @@ export default function RecordScreen() {
             <Text style={[styles.th, { flex: 1 }]}>횟수 (회)</Text>
             <View style={{ width: 36 }} />
           </View>
-          {sets.map((s, i) => (
-            <View key={s.id} style={[styles.tr, styles.trBody, i < sets.length - 1 && styles.trDivider]}>
-              <Text style={[styles.setLabel, { width: hasPrefilled ? 60 : 45 }, !isDone(s) && !s.prefilled && { color: Palette.muted }]}>
+          {rows.map((s, i) => (
+            <View key={s.key} style={[styles.tr, styles.trBody, i < rows.length - 1 && styles.trDivider]}>
+              <Text style={[styles.setLabel, { width: hasPrefilled ? 60 : 45 }, !s.id && !s.prefilled && { color: Palette.muted }]}>
                 {`${i + 1}세트`}
               </Text>
               {!hasPrefilled && <Text style={styles.time}>{s.time}</Text>}
               <View style={styles.cell}>
                 {s.prefilled ? (
-                  <Pressable style={[styles.input, styles.dimmed]} onPress={() => confirm(s.id)}>
+                  <Pressable style={[styles.input, styles.dimmed]} onPress={() => commit(s.key, {})}>
                     <Text style={styles.inputText}>{s.weight ?? '-'}</Text>
                   </Pressable>
                 ) : (
-                  <NumberInput value={s.weight} onChange={(v) => patch(s.id, { weight: v })} decimal />
+                  <NumberInput value={s.weight} invalid={s.invalid} onCommit={(v) => commit(s.key, { weight: v })} decimal />
                 )}
               </View>
               <View style={styles.cell}>
                 {s.prefilled ? (
-                  <Pressable style={[styles.input, styles.dimmed]} onPress={() => confirm(s.id)}>
+                  <Pressable style={[styles.input, styles.dimmed]} onPress={() => commit(s.key, {})}>
                     <Text style={styles.inputText}>{s.reps ?? '-'}</Text>
                   </Pressable>
                 ) : (
-                  <NumberInput value={s.reps} onChange={(v) => patch(s.id, { reps: v })} />
+                  <NumberInput value={s.reps} invalid={s.invalid} onCommit={(v) => commit(s.key, { reps: v })} />
                 )}
               </View>
-              <Pressable style={styles.delete} onPress={() => remove(s.id)} hitSlop={6}>
+              <Pressable style={styles.delete} onPress={() => remove(s)} hitSlop={6}>
                 <X size={20} color="rgba(255,255,255,0.4)" />
               </Pressable>
             </View>
           ))}
         </View>
 
-        <Pressable style={styles.addSet} onPress={addSet}>
+        <Pressable style={styles.addSet} onPress={addRow}>
           <Plus size={16} color={Palette.accent} />
           <Text style={styles.addSetText}>세트 추가</Text>
         </Pressable>
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable style={styles.routineBtn} onPress={() => setRoutineOpen(true)}>
+        <Pressable
+          style={styles.routineBtn}
+          onPress={async () => {
+            try {
+              const s = await getInProgress(); // fresh numbers for the other exercises
+              if (s) setSession(s);
+            } catch {}
+            setRoutineOpen(true);
+          }}>
           <Menu size={18} color="rgba(255,255,255,0.7)" />
           <Text style={styles.routineText}>오늘의 루틴 보기</Text>
         </Pressable>
       </View>
 
       {session && (
-        <RoutineSheet session={session} currentId={id} visible={routineOpen} onClose={() => setRoutineOpen(false)} />
+        <RoutineSheet session={session} currentId={sessionExerciseId} visible={routineOpen} onClose={() => setRoutineOpen(false)} />
       )}
     </Screen>
   );
 }
 
-/** Keeps its own text so partial input like "7." survives; commits the parsed number. */
-function NumberInput({ value, onChange, decimal }: { value: number | null; onChange: (v: number | null) => void; decimal?: boolean }) {
+/** Keeps its own text so partial input like "7." survives; reports the parsed number when the field loses focus. */
+function NumberInput({ value, onCommit, decimal, invalid }: { value: number | null; onCommit: (v: number | null) => void; decimal?: boolean; invalid?: boolean }) {
   const [text, setText] = useState(value === null ? '' : String(value));
   const [focused, setFocused] = useState(false);
   const empty = text === '';
 
   return (
     <TextInput
-      style={[styles.input, styles.inputText, empty && styles.inputEmpty, focused && styles.inputFocused]}
+      style={[styles.input, styles.inputText, empty && styles.inputEmpty, focused && styles.inputFocused, invalid && styles.inputInvalid]}
       value={text}
       placeholder="-"
       placeholderTextColor={Palette.dim}
       keyboardType={decimal ? 'decimal-pad' : 'number-pad'}
       selectTextOnFocus
       onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      onChangeText={(t) => {
-        const clean = t.replace(decimal ? /[^0-9.]/g : /[^0-9]/g, '');
-        setText(clean);
-        const n = parseFloat(clean);
-        onChange(Number.isNaN(n) ? null : n);
+      onBlur={() => {
+        setFocused(false);
+        const n = parseFloat(text);
+        onCommit(Number.isNaN(n) ? null : n);
       }}
+      onChangeText={(t) => setText(t.replace(decimal ? /[^0-9.]/g : /[^0-9]/g, ''))}
     />
   );
 }
 
 function RoutineSheet({ session, currentId, visible, onClose }: { session: Session; currentId: string; visible: boolean; onClose: () => void }) {
-  const items = session.exercises.filter((e) => e.sets.length);
+  const items = session.exercises.filter((e) => e.setCount > 0 || e.sessionExerciseId === currentId);
   return (
     <Sheet visible={visible} onClose={onClose} maxHeight="80%">
       <Text style={styles.sheetTitle}>오늘의 루틴</Text>
       <Text style={styles.sheetSub}>진행 중인 운동 목록</Text>
       <ScrollView style={{ marginTop: 8 }}>
         {items.map((e, i) => {
-          const current = e.exerciseId === currentId;
-          const info = exerciseById(e.exerciseId);
+          const current = e.sessionExerciseId === currentId;
           return (
-            <View key={e.exerciseId} style={[styles.rtRow, i > 0 && styles.rtDivider]}>
+            <View key={e.sessionExerciseId} style={[styles.rtRow, i > 0 && styles.rtDivider]}>
               <View style={styles.rtLeft}>
                 <View style={[styles.bar, current && styles.barActive]} />
                 <View style={{ gap: 4 }}>
                   <View style={styles.rtTitle}>
-                    <Text style={styles.rtName}>{info.name}</Text>
+                    <Text style={styles.rtName}>{e.name}</Text>
                     <View style={styles.tag}>
-                      <Text style={styles.tagText}>{groupById(info.group).name}</Text>
+                      <Text style={styles.tagText}>{e.category.name}</Text>
                     </View>
                   </View>
-                  <Text style={styles.rtTime}>{e.sets.find((s) => s.time)?.time}</Text>
+                  <Text style={styles.rtTime}>{e.firstSetAt ? clock(toMs(e.firstSetAt)) : ''}</Text>
                 </View>
               </View>
               <Text style={[styles.rtStatus, current && { color: Palette.accent }]}>
-                {current ? '진행 중' : `${doneSets(e).length}세트 완료`}
+                {current ? '진행 중' : `${e.setCount}세트 완료`}
               </Text>
             </View>
           );
         })}
       </ScrollView>
       <Text style={styles.rtFooter}>
-        {`총 ${items.length}개 종목 · ${kg(totalVolume(items))}kg · ${totalSets(items)}세트`}
+        {`총 ${session.summary.exerciseCount}개 종목 · ${kg(session.summary.totalVolume)}kg · ${session.summary.totalSets}세트`}
       </Text>
     </Sheet>
   );
@@ -290,6 +335,7 @@ const styles = StyleSheet.create({
   inputText: { fontFamily: Font.outfit.semibold, fontSize: 14, color: '#fff', textAlign: 'center' },
   inputEmpty: { backgroundColor: Palette.border, borderColor: Palette.dim },
   inputFocused: { backgroundColor: Palette.border, borderColor: Palette.accent, borderWidth: 1.5 },
+  inputInvalid: { borderColor: Palette.danger, borderWidth: 1.5 },
   dimmed: { width: 76, paddingVertical: 6, backgroundColor: Palette.inset, opacity: 0.5 },
   delete: { width: 36, height: 38, alignItems: 'center', justifyContent: 'center' },
   addSet: {

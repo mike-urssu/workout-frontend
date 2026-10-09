@@ -1,30 +1,66 @@
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { Camera } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 
+import { ApiError } from '@/api/client';
+import {
+  Session, cancelSession, completeSession, sessionBreakdown, startSession, toMs, uploadMedia,
+} from '@/api/workout';
 import { GroupBreakdown } from '@/components/group-breakdown';
 import { Screen } from '@/components/screen';
 import { Sheet } from '@/components/sheet';
 import { Font, Palette } from '@/constants/theme';
-import { GROUPS, exerciseById, exercisesOf } from '@/data/catalog';
-import { repo } from '@/data/repository';
-import {
-  Media, Session, doneSets, elapsed, kg, koreanDate, minSec, totalVolume,
-} from '@/data/workout';
+import { elapsed, kg, koreanDate, minSec } from '@/data/workout';
+import { useActiveSession } from '@/hooks/use-active-session';
+import { styleOf, useCategories } from '@/hooks/use-categories';
 import { useElapsed } from '@/hooks/use-elapsed';
-import { useWorkoutData } from '@/hooks/use-workout-data';
+import { confirm, errorMessage, notify } from '@/lib/dialog';
 
 export default function HomeScreen() {
-  const { active, setActive, reload } = useWorkoutData();
-  const seconds = useElapsed(active?.startedAt);
+  const { active, setActive, reload } = useActiveSession();
+  const categories = useCategories();
+  const seconds = useElapsed(active ? toMs(active.startedAt) : undefined);
   const [finishing, setFinishing] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const recorded = active?.exercises.filter((e) => doneSets(e).length) ?? [];
+  const recorded = active?.exercises.filter((e) => e.setCount > 0) ?? [];
 
-  const start = async () => setActive(await repo.startSession());
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify(errorMessage(e));
+      await reload(); // another device may have changed the session
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const start = () =>
+    run(async () => {
+      try {
+        setActive(await startSession());
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'WORKOUT_SESSION_ALREADY_IN_PROGRESS') return reload();
+        throw e;
+      }
+    });
+
+  const cancel = () =>
+    run(async () => {
+      if (!active || !(await confirm('운동을 취소할까요?', '운동 취소', '기록한 세트가 모두 삭제돼요.'))) return;
+      await cancelSession(active.id);
+      setActive(null);
+    });
+
+  const finish = () => {
+    if (active && active.summary.totalSets === 0) return notify('세트를 하나 이상 기록하거나 운동을 취소하세요.');
+    setFinishing(true);
+  };
 
   return (
     <Screen>
@@ -45,22 +81,25 @@ export default function HomeScreen() {
             <Text style={styles.recordedLabel}>기록된 운동</Text>
             {recorded.length === 0 && <Text style={styles.empty}>아직 기록된 운동이 없어요</Text>}
             {recorded.map((e) => (
-              <View key={e.exerciseId} style={styles.recordedRow}>
-                <Text style={styles.recordedName}>{exerciseById(e.exerciseId).name}</Text>
-                <Text style={styles.recordedSets}>{`${doneSets(e).length}세트 완료`}</Text>
+              <View key={e.sessionExerciseId} style={styles.recordedRow}>
+                <Text style={styles.recordedName}>{e.name}</Text>
+                <Text style={styles.recordedSets}>{`${e.setCount}세트 완료`}</Text>
               </View>
             ))}
+            <Pressable onPress={cancel} disabled={busy} hitSlop={8} style={styles.cancel}>
+              <Text style={styles.cancelText}>운동 취소</Text>
+            </Pressable>
           </View>
         )}
 
         <Text style={styles.sectionLabel}>MUSCLE GROUPS</Text>
         <View style={styles.grid}>
-          {GROUPS.map((g) => (
-            <Pressable key={g.id} style={styles.groupCard} onPress={() => router.push(`/group/${g.id}`)}>
-              <Image source={g.image} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {categories.map((c) => (
+            <Pressable key={c.id} style={styles.groupCard} onPress={() => router.push(`/group/${c.id}`)}>
+              <Image source={styleOf(c.name)?.image} style={StyleSheet.absoluteFill} contentFit="cover" />
               <View style={styles.groupOverlay} />
-              <Text style={styles.groupName}>{g.name}</Text>
-              <Text style={styles.groupCount}>{`${exercisesOf(g.id).length}개 운동`}</Text>
+              <Text style={styles.groupName}>{c.name}</Text>
+              <Text style={styles.groupCount}>{`${c.exerciseCount}개 운동`}</Text>
             </Pressable>
           ))}
         </View>
@@ -68,11 +107,11 @@ export default function HomeScreen() {
 
       <View style={styles.cta}>
         {active ? (
-          <Pressable style={[styles.ctaBtn, styles.ctaOutline]} onPress={() => setFinishing(true)}>
+          <Pressable style={[styles.ctaBtn, styles.ctaOutline]} onPress={finish} disabled={busy}>
             <Text style={[styles.ctaText, { color: Palette.accent }]}>운동 종료</Text>
           </Pressable>
         ) : (
-          <Pressable style={[styles.ctaBtn, styles.ctaFilled]} onPress={start}>
+          <Pressable style={[styles.ctaBtn, styles.ctaFilled]} onPress={start} disabled={busy}>
             <Text style={[styles.ctaText, { color: Palette.bg }]}>운동 시작</Text>
           </Pressable>
         )}
@@ -84,10 +123,9 @@ export default function HomeScreen() {
           seconds={seconds}
           visible={finishing}
           onClose={() => setFinishing(false)}
-          onDone={async (media) => {
-            await repo.endSession(media);
+          onDone={() => {
             setFinishing(false);
-            reload();
+            setActive(null);
           }}
         />
       )}
@@ -115,23 +153,55 @@ type CompleteProps = {
   seconds: number;
   visible: boolean;
   onClose: () => void;
-  onDone: (media: Media[]) => void;
+  onDone: () => void;
 };
 
+const MAX_MEDIA = 10;
+
 function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteProps) {
-  const [media, setMedia] = useState<Media[]>([]);
-  const exercises = session.exercises.filter((e) => doneSets(e).length);
+  const [picked, setPicked] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [uploaded, setUploaded] = useState<Record<string, string>>({}); // asset uri -> media id, kept for retries
+  const [saving, setSaving] = useState(false);
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
+      selectionLimit: MAX_MEDIA - picked.length,
     });
-    if (res.canceled) return;
-    setMedia((m) => [
-      ...m,
-      ...res.assets.map((a): Media => ({ uri: a.uri, type: a.type === 'video' ? 'video' : 'image' })),
-    ]);
+    if (!res.canceled) setPicked((m) => [...m, ...res.assets].slice(0, MAX_MEDIA));
+  };
+
+  /** Upload what is not uploaded yet (in picked order), then complete with the ids. Any failure stops before completing (BR-007). */
+  const save = async (withMedia: boolean) => {
+    setSaving(true);
+    try {
+      const ids: string[] = [];
+      const done = { ...uploaded };
+      if (withMedia) {
+        for (const a of picked) {
+          if (!done[a.uri]) {
+            const isVideo = a.type === 'video';
+            const name = a.fileName ?? `upload.${isVideo ? 'mp4' : 'jpg'}`;
+            try {
+              done[a.uri] = (await uploadMedia(session.id, { uri: a.uri, name, type: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg') })).id;
+            } finally {
+              setUploaded({ ...done });
+            }
+          }
+          ids.push(done[a.uri]);
+        }
+      }
+      await completeSession(session.id, ids);
+      setPicked([]);
+      setUploaded({});
+      onDone();
+    } catch (e) {
+      notify(mediaMessage(e));
+      if (e instanceof ApiError && ['WORKOUT_SESSION_NOT_EDITABLE', 'WORKOUT_SESSION_ALREADY_COMPLETED', 'WORKOUT_SESSION_NOT_FOUND', 'WORKOUT_SESSION_HAS_NO_SETS'].includes(e.code)) onDone();
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -139,7 +209,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
       <ScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator={false}>
         <Text style={styles.sheetTitle}>오늘의 운동 완료! 💪</Text>
         <View style={styles.sheetMeta}>
-          <Text style={styles.sheetDate}>{`${new Date().getFullYear()}년 ${koreanDate(new Date()).replace(/요일$/, '')}`}</Text>
+          <Text style={styles.sheetDate}>{`${session.performedDate.slice(0, 4)}년 ${koreanDate(new Date(`${session.performedDate}T00:00:00`)).replace(/요일$/, '')}`}</Text>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{minSec(seconds)}</Text>
           </View>
@@ -147,32 +217,48 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
 
         <View style={styles.volumeCard}>
           <Text style={styles.volumeLabel}>총 볼륨</Text>
-          <Text style={styles.volumeValue}>{`${kg(totalVolume(exercises))} kg`}</Text>
+          <Text style={styles.volumeValue}>{`${kg(session.summary.totalVolume)} kg`}</Text>
         </View>
 
-        <GroupBreakdown exercises={exercises} bg={Palette.inset} />
+        <GroupBreakdown groups={sessionBreakdown(session)} bg={Palette.inset} />
 
         <Text style={styles.mediaLabel}>오운완 인증</Text>
-        <Pressable style={styles.upload} onPress={pick}>
+        <Pressable style={styles.upload} onPress={pick} disabled={saving || picked.length >= MAX_MEDIA}>
           <View style={styles.cameraBg}>
             <Camera size={20} color={Palette.accent} />
           </View>
           <Text style={styles.uploadText}>
-            {media.length ? `${media.length}개 선택됨 · 사진 또는 동영상 추가` : '사진 또는 동영상 추가'}
+            {picked.length ? `${picked.length}개 선택됨 · 사진 또는 동영상 추가` : '사진 또는 동영상 추가'}
           </Text>
         </Pressable>
       </ScrollView>
 
       <View style={styles.actions}>
-        <Pressable style={[styles.actionBtn, styles.ctaFilled]} onPress={() => onDone(media)}>
-          <Text style={[styles.ctaText, { color: Palette.bg }]}>저장하기</Text>
+        <Pressable style={[styles.actionBtn, styles.ctaFilled, saving && { opacity: 0.5 }]} onPress={() => save(true)} disabled={saving}>
+          <Text style={[styles.ctaText, { color: Palette.bg }]}>{saving ? '저장 중…' : '저장하기'}</Text>
         </Pressable>
-        <Pressable style={[styles.actionBtn, styles.ctaOutline]} onPress={() => onDone([])}>
+        <Pressable style={[styles.actionBtn, styles.ctaOutline, saving && { opacity: 0.5 }]} onPress={() => save(false)} disabled={saving}>
           <Text style={[styles.ctaText, { color: Palette.accent }]}>건너뛰기</Text>
         </Pressable>
       </View>
     </Sheet>
   );
+}
+
+/** Upload / complete failures (workout-media design 4.2). */
+function mediaMessage(e: unknown) {
+  if (e instanceof ApiError) {
+    if (e.code === 'MEDIA_UNSUPPORTED_TYPE') return '지원하지 않는 파일이에요. 사진은 JPEG·PNG·HEIC, 동영상은 MP4·MOV만 가능해요.';
+    if (e.code === 'MEDIA_LIMIT_EXCEEDED') {
+      const limit = e.details?.limit;
+      return limit === 'COUNT' ? '사진·동영상은 10개까지 올릴 수 있어요.'
+        : limit === 'DURATION' ? '동영상은 1분까지 올릴 수 있어요.'
+        : '사진은 20MB, 동영상은 100MB까지 올릴 수 있어요.';
+    }
+    if (e.status === 503 || e.status === 0) return '올리지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.';
+    if (e.code === 'WORKOUT_SESSION_HAS_NO_SETS') return '세트를 하나 이상 기록해야 운동을 완료할 수 있어요.';
+  }
+  return errorMessage(e);
 }
 
 const styles = StyleSheet.create({
@@ -195,6 +281,8 @@ const styles = StyleSheet.create({
   empty: { fontFamily: Font.manrope.regular, fontSize: 13, color: Palette.dim },
   recordedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   recordedName: { fontFamily: Font.outfit.bold, fontSize: 15, color: '#fff' },
+  cancel: { alignSelf: 'flex-end', marginTop: 4 },
+  cancelText: { fontFamily: Font.manrope.semibold, fontSize: 12, color: Palette.danger },
   recordedSets: { fontFamily: Font.manrope.semibold, fontSize: 13, color: 'rgba(255,255,255,0.7)' },
   sectionLabel: { fontFamily: Font.outfit.bold, fontSize: 16, color: Palette.muted },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },

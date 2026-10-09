@@ -9,7 +9,7 @@ http
   .createServer(async (req, res) => {
     const cors = {
       'Access-Control-Allow-Origin': req.headers.origin ?? '*',
-      'Access-Control-Allow-Headers': 'content-type,authorization',
+      'Access-Control-Allow-Headers': 'content-type,authorization,x-time-zone',
       'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       Vary: 'Origin',
     };
@@ -18,7 +18,7 @@ http
       const chunks = [];
       for await (const c of req) chunks.push(c);
       const headers = {};
-      for (const h of ['content-type', 'authorization']) if (req.headers[h]) headers[h] = req.headers[h];
+      for (const h of ['content-type', 'authorization', 'x-time-zone']) if (req.headers[h]) headers[h] = req.headers[h];
       const up = await fetch(TARGET + req.url, {
         method: req.method,
         headers,
