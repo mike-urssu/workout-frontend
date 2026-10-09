@@ -10,8 +10,9 @@ import {
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { Sheet } from '@/components/sheet';
+import { SwipeBack } from '@/components/swipe-back';
 import { Font, Palette } from '@/constants/theme';
-import { clock, elapsed, kg } from '@/data/workout';
+import { clockSec, elapsed, kg } from '@/data/workout';
 import { useElapsed } from '@/hooks/use-elapsed';
 import { confirm, errorMessage, notify } from '@/lib/dialog';
 
@@ -23,10 +24,11 @@ type Row = {
   saved?: { weight: number; reps: number };
 };
 
+const TIME_W = 66; // fits "14:23:05"
 let draftSeq = 0;
 const draft = (weight: number | null, over: Partial<Row> = {}): Row => ({ key: `draft-${draftSeq++}`, weight, reps: null, time: '', ...over });
 const fromServer = (s: SessionExercise['sets'][number]): Row => ({
-  key: s.id, id: s.id, weight: s.weight, reps: s.repetitions, time: clock(toMs(s.createdAt)),
+  key: s.id, id: s.id, weight: s.weight, reps: s.repetitions, time: clockSec(toMs(s.createdAt)),
   saved: { weight: s.weight, reps: s.repetitions },
 });
 // Client-side copy of the server rules (BR-003, BR-005); the server checks again.
@@ -89,7 +91,7 @@ export default function RecordScreen() {
         ? await updateSet(sessionId, sessionExerciseId, row.id, row.weight, row.reps)
         : await addSet(sessionId, sessionExerciseId, row.weight, row.reps);
       // ponytail: edits made while this request is in flight are not saved; blur again to save them
-      patch(key, { id: saved.id, time: clock(toMs(saved.createdAt)), prefilled: false, saving: false, saved: { weight: saved.weight, reps: saved.repetitions } });
+      patch(key, { id: saved.id, time: clockSec(toMs(saved.createdAt)), prefilled: false, saving: false, saved: { weight: saved.weight, reps: saved.repetitions } });
     } catch (e) {
       patch(key, { saving: false, invalid: e instanceof ApiError && e.code === 'VALIDATION_FAILED' });
       fail(e);
@@ -126,6 +128,7 @@ export default function RecordScreen() {
 
   return (
     <Screen>
+      <SwipeBack onBack={backToList}>
       <ScreenHeader
         title={ex?.name ?? ''}
         subtitle={ex ? `${ex.category.name} • ${ex.target}` : ''}
@@ -172,7 +175,7 @@ export default function RecordScreen() {
         <View style={styles.table}>
           <View style={[styles.tr, styles.thead]}>
             <Text style={[styles.th, { width: hasPrefilled ? 60 : 45 }]}>세트</Text>
-            {!hasPrefilled && <Text style={[styles.th, styles.thDim, { width: 50 }]}>시간</Text>}
+            {!hasPrefilled && <Text style={[styles.th, styles.thDim, { width: TIME_W }]}>시간</Text>}
             <Text style={[styles.th, { flex: 1 }]}>무게 (kg)</Text>
             <Text style={[styles.th, { flex: 1 }]}>횟수 (회)</Text>
             <View style={{ width: 36 }} />
@@ -232,6 +235,7 @@ export default function RecordScreen() {
       {session && (
         <RoutineSheet session={session} currentId={sessionExerciseId} visible={routineOpen} onClose={() => setRoutineOpen(false)} />
       )}
+      </SwipeBack>
     </Screen>
   );
 }
@@ -281,7 +285,7 @@ function RoutineSheet({ session, currentId, visible, onClose }: { session: Sessi
                       <Text style={styles.tagText}>{e.category.name}</Text>
                     </View>
                   </View>
-                  <Text style={styles.rtTime}>{e.firstSetAt ? clock(toMs(e.firstSetAt)) : ''}</Text>
+                  <Text style={styles.rtTime}>{e.firstSetAt ? clockSec(toMs(e.firstSetAt)) : ''}</Text>
                 </View>
               </View>
               <Text style={[styles.rtStatus, current && { color: Palette.accent }]}>
@@ -332,7 +336,7 @@ const styles = StyleSheet.create({
   trBody: { paddingVertical: 6 },
   trDivider: { borderBottomWidth: 1, borderBottomColor: Palette.border },
   setLabel: { fontFamily: Font.outfit.bold, fontSize: 14, color: '#fff', textAlign: 'center' },
-  time: { width: 50, fontFamily: Font.manrope.medium, fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
+  time: { width: TIME_W, fontFamily: Font.manrope.medium, fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
   cell: { flex: 1, alignItems: 'center', paddingVertical: 6 },
   input: {
     width: 70, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, textAlign: 'center',

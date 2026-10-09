@@ -9,6 +9,8 @@ export const clock = (ms: number) => {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+/** HH:mm:ss */
+export const clockSec = (ms: number) => `${clock(ms)}:${pad(new Date(ms).getSeconds())}`;
 export const elapsed = (sec: number) =>
   `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`;
 export const minSec = (sec: number) => `${Math.floor(sec / 60)}분 ${sec % 60}초`;
