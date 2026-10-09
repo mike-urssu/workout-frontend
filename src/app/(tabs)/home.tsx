@@ -1,11 +1,12 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { Camera } from 'lucide-react-native';
+import { Camera, LogOut } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { logout } from '@/api/auth';
 import {
   Session, cancelSession, completeSession, sessionBreakdown, startSession, toMs, uploadMedia,
 } from '@/api/workout';
@@ -25,6 +26,7 @@ export default function HomeScreen() {
   const seconds = useElapsed(active ? toMs(active.startedAt) : undefined);
   const [finishing, setFinishing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const recorded = active?.exercises.filter((e) => e.setCount > 0) ?? [];
 
@@ -65,7 +67,13 @@ export default function HomeScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>{'오늘의 운동을\n선택하세요'}</Text>
+        <View style={styles.titleRow}>
+          <Text style={[styles.title, { flex: 1 }]}>{'오늘의 운동을\n선택하세요'}</Text>
+          <Pressable style={styles.logoutBtn} onPress={() => setLoggingOut(true)}>
+            <LogOut size={16} color="#fff" />
+            <Text style={styles.logoutText}>로그아웃</Text>
+          </Pressable>
+        </View>
         <Text style={styles.date}>{koreanDate(new Date())}</Text>
 
         {active && (
@@ -116,6 +124,24 @@ export default function HomeScreen() {
           </Pressable>
         )}
       </View>
+
+      <Sheet visible={loggingOut} onClose={() => setLoggingOut(false)}>
+        <Text style={styles.logoutTitle}>로그아웃 하시겠어요?</Text>
+        <View style={{ gap: 12, marginTop: 24 }}>
+          <Pressable
+            style={[styles.actionBtn, styles.ctaFilled]}
+            onPress={async () => {
+              await logout(); // clears the token even when the request fails
+              setLoggingOut(false);
+              router.replace('/');
+            }}>
+            <Text style={[styles.ctaText, { color: Palette.bg }]}>로그아웃</Text>
+          </Pressable>
+          <Pressable style={[styles.actionBtn, styles.ctaOutline]} onPress={() => setLoggingOut(false)}>
+            <Text style={[styles.ctaText, { color: Palette.accent }]}>취소</Text>
+          </Pressable>
+        </View>
+      </Sheet>
 
       {active && (
         <CompleteSheet
@@ -264,6 +290,13 @@ function mediaMessage(e: unknown) {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16, gap: 16 },
   title: { fontFamily: Font.outfit.extrabold, fontSize: 28, lineHeight: 34, color: '#fff' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  logoutBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 100, backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border,
+  },
+  logoutText: { fontFamily: Font.manrope.bold, fontSize: 13, color: '#fff' },
+  logoutTitle: { fontFamily: Font.outfit.extrabold, fontSize: 28, lineHeight: 34, color: '#fff', textAlign: 'center', marginTop: 12 },
   date: { fontFamily: Font.manrope.semibold, fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: -8 },
   timerCard: {
     backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border,
