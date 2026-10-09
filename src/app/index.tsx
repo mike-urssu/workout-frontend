@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Check } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -8,6 +9,7 @@ import { REASON_NOTICE, checkSession, login } from '@/api/auth';
 import { Screen } from '@/components/screen';
 import { Font, Palette } from '@/constants/theme';
 import { clock } from '@/data/workout';
+import { rememberLogin } from '@/lib/remember-login';
 
 const PIN_LENGTH = 6;
 
@@ -17,6 +19,7 @@ export default function LoginScreen() {
   const [notice, setNotice] = useState(reason ? REASON_NOTICE[reason] : undefined);
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
+  const [remember, setRemember] = useState(false);
   const [pinFocused, setPinFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ field: 'username' | 'pin'; message: string } | null>(null);
@@ -27,6 +30,12 @@ export default function LoginScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (retryKey === 0) {
+        const saved = await rememberLogin.load();
+        if (cancelled) return;
+        setRemember(saved.on);
+        setUsername(saved.username);
+      }
       const token = await tokenStore.get();
       if (!token) return setChecking(false);
       try {
@@ -54,6 +63,7 @@ export default function LoginScreen() {
     setSubmitting(true);
     try {
       await login(username.trim(), value);
+      if (remember) await rememberLogin.saveUsername(username.trim());
       router.replace('/home');
     } catch (e) {
       setPin('');
@@ -71,6 +81,11 @@ export default function LoginScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const toggleRemember = () => {
+    setRemember(!remember);
+    rememberLogin.setOn(!remember);
   };
 
   const onChangePin = (text: string) => {
@@ -121,6 +136,12 @@ export default function LoginScreen() {
               onSubmitEditing={() => pinRef.current?.focus()}
             />
             {error?.field === 'username' && <Text style={styles.error}>{error.message}</Text>}
+            <Pressable style={styles.rememberRow} onPress={toggleRemember} disabled={submitting} accessibilityRole="checkbox" accessibilityState={{ checked: remember }}>
+              <View style={[styles.checkbox, remember && styles.checkboxOn]}>
+                {remember && <Check size={14} color={Palette.bg} strokeWidth={3} />}
+              </View>
+              <Text style={styles.rememberText}>아이디 기억</Text>
+            </Pressable>
           </View>
 
           <View style={styles.field}>
@@ -145,6 +166,7 @@ export default function LoginScreen() {
               keyboardType="number-pad"
               secureTextEntry
               maxLength={PIN_LENGTH}
+              autoFocus={!!username} // remembered username: go straight to the PIN
               caretHidden
             />
           </View>
@@ -166,6 +188,13 @@ const styles = StyleSheet.create({
     borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 24,
   },
   noticeText: { fontFamily: Font.manrope.semibold, fontSize: 13, color: 'rgba(255,255,255,0.8)' },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
+  checkbox: {
+    width: 20, height: 20, borderRadius: 6, backgroundColor: Palette.card, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: Palette.accent, borderColor: Palette.accent },
+  rememberText: { fontFamily: Font.manrope.medium, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
   form: { gap: 28 },
   field: { gap: 10 },
   label: { fontFamily: Font.manrope.bold, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
