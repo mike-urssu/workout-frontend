@@ -86,6 +86,12 @@ export default function HomeScreen() {
               <PulseDot />
             </View>
             <View style={styles.divider} />
+            <View style={styles.recordedRow}>
+              <Text style={styles.volumeRowLabel}>총 볼륨</Text>
+              <Text style={styles.volumeRowValue}>
+                {active.summary.totalVolume > 0 ? `${kg(active.summary.totalVolume)} kg` : '— kg'}
+              </Text>
+            </View>
             <Text style={styles.recordedLabel}>기록된 운동</Text>
             {recorded.length === 0 && <Text style={styles.empty}>아직 기록된 운동이 없어요</Text>}
             {recorded.map((e) => (
@@ -310,6 +316,8 @@ const styles = StyleSheet.create({
     shadowColor: Palette.live, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width: 0, height: 0 },
   },
   divider: { height: 1, backgroundColor: Palette.border, marginVertical: 6 },
+  volumeRowLabel: { fontFamily: Font.manrope.semibold, fontSize: 13, color: Palette.muted },
+  volumeRowValue: { fontFamily: Font.outfit.bold, fontSize: 15, color: 'rgba(255,255,255,0.7)' },
   recordedLabel: { fontFamily: Font.manrope.bold, fontSize: 12, color: Palette.muted },
   empty: { fontFamily: Font.manrope.regular, fontSize: 13, color: Palette.dim },
   recordedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
