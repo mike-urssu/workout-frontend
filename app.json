@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.joonhee.song.frontend"
+      "bundleIdentifier": "com.mikeurssu.letsworkout"
     },
     "android": {
       "adaptiveIcon": {
