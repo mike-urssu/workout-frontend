@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight, PenLine } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -54,15 +54,29 @@ export default function ExerciseListScreen() {
   return (
     <Screen>
       <SwipeBack onBack={back}>
-        <ScreenHeader title={`${name} 운동`} subtitle={`${name} 근육 발달을 위한 운동`} onBack={back} />
+        <ScreenHeader
+          title={`${name} 운동`}
+          subtitle={`${name} 근육 발달을 위한 운동`}
+          onBack={back}
+          right={
+            <Pressable style={styles.manage} onPress={() => router.push({ pathname: '/exercises', params: { categoryId: id } })}>
+              <PenLine size={16} color="#fff" />
+              <Text style={styles.manageText}>종목 관리</Text>
+            </Pressable>
+          }
+        />
         <ScrollView contentContainerStyle={styles.list}>
           {items.map((ex) => (
             <Pressable key={ex.id} style={styles.row} onPress={() => open(ex)} disabled={busy}>
               <View style={styles.details}>
                 <Text style={styles.name}>{ex.name}</Text>
                 <View style={styles.sub}>
-                  <Text style={styles.en}>{ex.nameEn}</Text>
-                  <View style={styles.dot} />
+                  {!!ex.nameEn && (
+                    <>
+                      <Text style={styles.en}>{ex.nameEn}</Text>
+                      <View style={styles.dot} />
+                    </>
+                  )}
                   {ex.lastPerformedDate ? (
                     <Text style={styles.recent}>{`최근 ${daysAgoText(Date.parse(`${ex.lastPerformedDate}T00:00:00`))} 완료`}</Text>
                   ) : (
@@ -87,6 +101,11 @@ export default function ExerciseListScreen() {
 }
 
 const styles = StyleSheet.create({
+  manage: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 100,
+    backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border,
+  },
+  manageText: { fontFamily: Font.manrope.bold, fontSize: 13, color: '#fff' },
   footer: { paddingHorizontal: 24, paddingVertical: 16 },
   list: { paddingHorizontal: 24, paddingVertical: 8, gap: 12 },
   row: {

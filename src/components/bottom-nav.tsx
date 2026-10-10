@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Font, Palette } from '@/constants/theme';
 
 const TABS: { href: Href; label: string; Icon: typeof House; match: string[] }[] = [
-  { href: '/home', label: '홈', Icon: House, match: ['/home', '/group', '/record'] },
+  { href: '/home', label: '홈', Icon: House, match: ['/home', '/group', '/record', '/exercises'] },
   { href: '/history', label: '기록', Icon: Dumbbell, match: ['/history'] },
   { href: '/stats', label: '통계', Icon: ChartLine, match: ['/stats'] },
 ];

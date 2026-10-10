@@ -5,10 +5,11 @@ import { ApiError, BASE_URL, request } from './client';
 // Shapes follow the backend design docs (workout-record v0.7, workout-media v0.2).
 export type CategoryRef = { id: string; name: string };
 export type Category = CategoryRef & { imageUrl: string; exerciseCount: number };
-export type ExerciseItem = { id: string; name: string; nameEn: string; target: string; lastPerformedDate: string | null };
+export type ExerciseItem = { id: string; name: string; nameEn: string | null; target: string | null; lastPerformedDate: string | null };
+export type ExerciseInput = { categoryId: string; name: string; nameEn: string | null };
 export type SetDto = { id: string; setNumber: number; weight: number; repetitions: number; createdAt: string };
 export type SessionExercise = {
-  sessionExerciseId: string; exerciseId: string; name: string; nameEn: string; target: string;
+  sessionExerciseId: string; exerciseId: string; name: string; nameEn: string | null; target: string | null;
   category: CategoryRef; sets: SetDto[]; setCount: number; totalRepetitions: number; volume: number; firstSetAt: string | null;
 };
 export type Session = {
@@ -36,6 +37,11 @@ const orNull = <T>(v: T | undefined) => v ?? null;
 
 export const getCategories = () => request<Category[]>('/api/v1/exercise-categories');
 export const getExercises = (categoryId: string) => request<ExerciseItem[]>(`/api/v1/exercises?categoryId=${categoryId}`);
+// ponytail: endpoints assumed (REQ-EXERCISE-004 ~ 006 have no API design yet); adjust when the backend lands.
+export const createExercise = (body: ExerciseInput) => request<ExerciseItem>('/api/v1/exercises', { method: 'POST', body });
+export const updateExercise = (id: string, body: ExerciseInput) =>
+  request<ExerciseItem>(`/api/v1/exercises/${id}`, { method: 'PUT', body });
+export const deleteExercise = (id: string) => request(`/api/v1/exercises/${id}`, { method: 'DELETE' });
 export const getLastRecord = async (exerciseId: string) =>
   orNull(await request<LastRecord | undefined>(`/api/v1/exercises/${exerciseId}/last-record`));
 

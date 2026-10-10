@@ -13,6 +13,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="stats" />
       <Tabs.Screen name="group/[id]" options={{ href: null }} />
       <Tabs.Screen name="record/[id]" options={{ href: null }} />
+      <Tabs.Screen name="exercises" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -131,7 +131,8 @@ export default function RecordScreen() {
       <SwipeBack onBack={backToList}>
       <ScreenHeader
         title={ex?.name ?? ''}
-        subtitle={ex ? `${ex.category.name} • ${ex.target}` : ''}
+        // user-added exercises have no target (BR-028)
+        subtitle={ex ? [ex.category.name, ex.target].filter(Boolean).join(' • ') : ''}
         // Tabs' back goes to the first tab (home); we want this exercise's list instead.
         onBack={backToList}
         right={
