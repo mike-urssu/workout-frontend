@@ -2,8 +2,9 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { Camera, LogOut } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
 import { logout } from '@/api/auth';
@@ -166,18 +167,20 @@ export default function HomeScreen() {
 }
 
 function PulseDot() {
-  const [opacity] = useState(() => new Animated.Value(1));
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.35, duration: 800, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [opacity]);
-  return <Animated.View style={[styles.pulse, { opacity }]} />;
+  return (
+    <Animated.View
+      style={[
+        styles.pulse,
+        {
+          animationName: { from: { opacity: 1 }, to: { opacity: 0.35 } },
+          animationDuration: '800ms',
+          animationIterationCount: 'infinite',
+          animationDirection: 'alternate',
+          animationTimingFunction: 'ease-in-out',
+        },
+      ]}
+    />
+  );
 }
 
 type CompleteProps = {
