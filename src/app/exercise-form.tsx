@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ApiError } from '@/api/client';
 import { createExercise, updateExercise } from '@/api/workout';
 import { CategoryChips } from '@/components/category-chips';
 import { Screen } from '@/components/screen';
@@ -21,6 +22,7 @@ export default function ExerciseFormScreen() {
   const [name, setName] = useState(params.name ?? '');
   const [nameEn, setNameEn] = useState(params.nameEn ?? '');
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<{ name?: string; nameEn?: string }>({});
 
   const ready = name.trim() !== '' && !saving; // BR-023: blank names count as missing
   const action = editing ? '저장' : '추가';
@@ -34,8 +36,13 @@ export default function ExerciseFormScreen() {
       invalidateCategories();
       router.back();
     } catch (e) {
-      notify(errorMessage(e)); // e.g. ERR-017 a same-named exercise already exists in that body part
       setSaving(false);
+      const err = e instanceof ApiError ? e : null;
+      if (err?.code === 'EXERCISE_NAME_DUPLICATED') return setErrors({ name: '이 부위에 같은 이름의 종목이 있어요.' }); // ERR-017
+      const reason = (field: string) => err?.errors?.find((f) => f.field === field)?.reason; // ERR-016
+      if (reason('name') || reason('nameEn')) return setErrors({ name: reason('name'), nameEn: reason('nameEn') });
+      notify(errorMessage(e));
+      if (err?.code === 'EXERCISE_NOT_FOUND') router.back(); // deleted on another device
     }
   };
 
@@ -51,7 +58,11 @@ export default function ExerciseFormScreen() {
             <Text style={styles.label}>
               운동 부위<Text style={styles.required}>{'  *'}</Text>
             </Text>
-            <CategoryChips categories={categories} value={categoryId} onChange={setCategoryId} />
+            <CategoryChips
+              categories={categories}
+              value={categoryId}
+              onChange={(id) => { setCategoryId(id); setErrors({}); }}
+            />
             <Text style={styles.hint}>부위를 하나 선택해 주세요.</Text>
           </View>
 
@@ -60,14 +71,15 @@ export default function ExerciseFormScreen() {
               종목명<Text style={[styles.required, styles.medium]}>{'  *'}</Text>
             </Text>
             <TextInput
-              style={styles.box}
+              style={[styles.box, errors.name && styles.boxFailed]}
               value={name}
-              onChangeText={setName}
+              onChangeText={(t) => { setName(t); setErrors({}); }}
               placeholder="종목명을 입력해 주세요"
               placeholderTextColor="#70707c"
               maxLength={30}
               autoCorrect={false}
             />
+            {errors.name && <Text style={styles.error}>{errors.name}</Text>}
           </View>
 
           <View style={styles.input}>
@@ -75,9 +87,9 @@ export default function ExerciseFormScreen() {
               영어명<Text style={[styles.optional, styles.medium]}>{'  (선택)'}</Text>
             </Text>
             <TextInput
-              style={styles.box}
+              style={[styles.box, errors.nameEn && styles.boxFailed]}
               value={nameEn}
-              onChangeText={setNameEn}
+              onChangeText={(t) => { setNameEn(t); setErrors({}); }}
               placeholder="영어명을 입력해 주세요"
               placeholderTextColor="#70707c"
               maxLength={50}
@@ -86,6 +98,7 @@ export default function ExerciseFormScreen() {
               returnKeyType="done"
               onSubmitEditing={save}
             />
+            {errors.nameEn && <Text style={styles.error}>{errors.nameEn}</Text>}
           </View>
 
           <Text style={styles.hint}>
@@ -124,6 +137,8 @@ const styles = StyleSheet.create({
     height: 56, paddingHorizontal: 18, borderRadius: 16, backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border,
     fontFamily: Font.manrope.regular, fontSize: 16, color: '#fff',
   },
+  boxFailed: { borderColor: Palette.danger },
+  error: { fontFamily: Font.manrope.semibold, fontSize: 12, color: Palette.danger },
   footer: { paddingHorizontal: 24, paddingTop: 8, gap: 12 },
   buttons: { flexDirection: 'row', gap: 12 },
   btn: { flex: 1, height: 55, borderRadius: 100, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },

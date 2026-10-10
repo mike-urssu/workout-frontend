@@ -37,11 +37,13 @@ const orNull = <T>(v: T | undefined) => v ?? null;
 
 export const getCategories = () => request<Category[]>('/api/v1/exercise-categories');
 export const getExercises = (categoryId: string) => request<ExerciseItem[]>(`/api/v1/exercises?categoryId=${categoryId}`);
-// ponytail: endpoints assumed (REQ-EXERCISE-004 ~ 006 have no API design yet); adjust when the backend lands.
-export const createExercise = (body: ExerciseInput) => request<ExerciseItem>('/api/v1/exercises', { method: 'POST', body });
-export const updateExercise = (id: string, body: ExerciseInput) =>
-  request<ExerciseItem>(`/api/v1/exercises/${id}`, { method: 'PUT', body });
+// API-EXERCISE-005 ~ 008 (workout-exercise-manage design)
+export const createExercise = (body: ExerciseInput) => request('/api/v1/exercises', { method: 'POST', body });
+export const updateExercise = (id: string, body: ExerciseInput) => request(`/api/v1/exercises/${id}`, { method: 'PUT', body });
 export const deleteExercise = (id: string) => request(`/api/v1/exercises/${id}`, { method: 'DELETE' });
+/** Every exercise of the body part, in the new order; 409 EXERCISE_ORDER_OUTDATED if the list changed meanwhile. */
+export const reorderExercises = (categoryId: string, exerciseIds: string[]) =>
+  request(`/api/v1/exercise-categories/${categoryId}/exercise-order`, { method: 'PUT', body: { exerciseIds } });
 export const getLastRecord = async (exerciseId: string) =>
   orNull(await request<LastRecord | undefined>(`/api/v1/exercises/${exerciseId}/last-record`));
 

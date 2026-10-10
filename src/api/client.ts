@@ -26,6 +26,8 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly details?: Record<string, unknown>,
+    /** Per-field reasons, only on 400 VALIDATION_FAILED (architecture 8.1). */
+    readonly errors?: { field: string; reason: string }[],
   ) {
     super(message);
   }
@@ -60,7 +62,7 @@ export async function request<T = void>(path: string, init: Init = {}): Promise<
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) {
-    const err = new ApiError(res.status, data?.code ?? 'UNKNOWN', data?.message ?? '요청에 실패했습니다.', data?.details);
+    const err = new ApiError(res.status, data?.code ?? 'UNKNOWN', data?.message ?? '요청에 실패했습니다.', data?.details, data?.errors);
     if (res.status === 401 && token && SESSION_CODES.includes(err.code) && !path.startsWith('/api/v1/auth/')) {
       await tokenStore.clear();
       router.replace({ pathname: '/', params: { reason: err.code } });
