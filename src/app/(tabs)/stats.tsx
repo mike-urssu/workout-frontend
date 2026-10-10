@@ -40,14 +40,32 @@ function CategoryChips({ categories, selected, disabled, onSelect }: {
   );
 }
 
+/** ‹ pages to older days, › back to the newer ones already seen (BR-016, design DEC-STATS-003). */
+function Pager({ canOlder, canNewer, disabled, onOlder, onNewer }: {
+  canOlder: boolean; canNewer: boolean; disabled: boolean; onOlder: () => void; onNewer: () => void;
+}) {
+  return (
+    <View style={styles.pager}>
+      <Pressable accessibilityLabel="이전 날짜" style={[styles.pageBtn, !canOlder && styles.pageOff]} onPress={onOlder} disabled={!canOlder || disabled}>
+        <ChevronLeft size={16} color="#fff" />
+      </Pressable>
+      <Pressable accessibilityLabel="다음 날짜" style={[styles.pageBtn, !canNewer && styles.pageOff]} onPress={onNewer} disabled={!canNewer || disabled}>
+        <ChevronRight size={16} color="#fff" />
+      </Pressable>
+    </View>
+  );
+}
+
 export default function StatsScreen() {
   const categories = useCategories();
   // Top chart: one body part's volume per day it was trained.
   const [topId, setTopId] = useState<string | null>(null);
   const [trend, setTrend] = useState<CategoryTrend | null>(null);
   const [newer, setNewer] = useState<CategoryTrend[]>([]); // intervals we paged past, kept for paging back
-  // Bottom chart: its own body part, its exercises and their volumes on the same dates.
+  // Bottom chart: its own body part, the days that part was trained (BR-015), its exercises and their volumes on those days.
   const [bottomId, setBottomId] = useState<string | null>(null);
+  const [axis, setAxis] = useState<CategoryTrend | null>(null);
+  const [axisNewer, setAxisNewer] = useState<CategoryTrend[]>([]);
   const [exercises, setExercises] = useState<StatsExercise[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [exTrend, setExTrend] = useState<ExerciseTrend | null>(null);
@@ -64,18 +82,23 @@ export default function StatsScreen() {
     }
   };
 
-  /** The exercise chart shares the dates of the top chart; nothing is requested for 0 exercises. */
+  /** Nothing is requested for 0 exercises or no days. */
   const loadExerciseTrend = async (ids: string[], dates: string[]) =>
     setExTrend(ids.length && dates.length ? await getExerciseTrend(ids, dates) : null);
 
-  /** The exercise list follows the bottom chart's body part, and all its recorded exercises are selected (BR-010, BR-017). */
-  const chooseBottom = async (id: string, dates: string[]) => {
+  /**
+   * The exercise list follows the bottom chart's body part, and all its recorded exercises are selected (BR-010, BR-017).
+   * Its axis is the days that part was trained, from the same API as the top chart (BR-015, design DEC-STATS-012).
+   */
+  const chooseBottom = async (id: string, days?: CategoryTrend) => {
     setBottomId(id);
-    const list = await getStatsExercises(id);
+    const [list, a] = await Promise.all([getStatsExercises(id), days ?? getCategoryTrend(id)]);
     const ids = list.map((e) => e.id);
     setExercises(list);
     setPicked(ids);
-    await loadExerciseTrend(ids, dates);
+    setAxis(a);
+    setAxisNewer([]);
+    await loadExerciseTrend(ids, a.dates);
   };
 
   // Opening the screen always starts from chest in both charts and the latest interval.
@@ -89,20 +112,19 @@ export default function StatsScreen() {
         setTrend(t);
         setNewer([]);
         setExTrend(null);
-        await chooseBottom(chest.id, t.dates);
+        await chooseBottom(chest.id, t); // both charts start on chest: one response serves both
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
 
-  /** Changing the top chart's part starts from its latest interval (TODO-014); the exercise chart follows the new dates (BR-015). */
+  /** Changing the top chart's part starts from its latest interval (TODO-014); the exercise chart keeps its own days (BR-015). */
   const chooseTop = (id: string) =>
     guard(async () => {
       const t = await getCategoryTrend(id);
       setTopId(id);
       setTrend(t);
       setNewer([]);
-      await loadExerciseTrend(picked, t.dates);
     });
 
   const older = () =>
@@ -112,23 +134,38 @@ export default function StatsScreen() {
       const t = await getCategoryTrend(topId, trend.dates[trend.dates.length - 1]);
       setNewer([...newer, trend]);
       setTrend(t);
-      await loadExerciseTrend(picked, t.dates);
     });
 
-  const newerInterval = () =>
-    newer.length > 0 && !loading &&
+  const newerInterval = () => {
+    if (newer.length === 0 || loading) return;
+    setTrend(newer[newer.length - 1]);
+    setNewer(newer.slice(0, -1));
+  };
+
+  /** The exercise chart pages through its own part's days, keeping the selected exercises (BR-015, BR-016). */
+  const olderAxis = () =>
+    axis?.hasPrevious && bottomId && !loading &&
     guard(async () => {
-      const t = newer[newer.length - 1];
-      setNewer(newer.slice(0, -1));
-      setTrend(t);
-      await loadExerciseTrend(picked, t.dates);
+      const a = await getCategoryTrend(bottomId, axis.dates[axis.dates.length - 1]);
+      setAxisNewer([...axisNewer, axis]);
+      setAxis(a);
+      await loadExerciseTrend(picked, a.dates);
+    });
+
+  const newerAxis = () =>
+    axisNewer.length > 0 && !loading &&
+    guard(async () => {
+      const a = axisNewer[axisNewer.length - 1];
+      setAxisNewer(axisNewer.slice(0, -1));
+      setAxis(a);
+      await loadExerciseTrend(picked, a.dates);
     });
 
   const toggle = (id: string) => {
-    if (loading || !trend) return;
+    if (loading || !axis) return;
     const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
     setPicked(next);
-    guard(() => loadExerciseTrend(next, trend.dates));
+    guard(() => loadExerciseTrend(next, axis.dates));
   };
 
   const colorOf = (id: string) => LINE_COLORS[Math.max(0, picked.indexOf(id)) % LINE_COLORS.length];
@@ -148,14 +185,7 @@ export default function StatsScreen() {
 
         <View style={styles.sectionRow}>
           <Text style={styles.section}>부위별 볼륨 추이 (단위: 1,000kg)</Text>
-          <View style={styles.pager}>
-            <Pressable style={[styles.pageBtn, !trend?.hasPrevious && styles.pageOff]} onPress={older} disabled={!trend?.hasPrevious || loading}>
-              <ChevronLeft size={16} color="#fff" />
-            </Pressable>
-            <Pressable style={[styles.pageBtn, newer.length === 0 && styles.pageOff]} onPress={newerInterval} disabled={newer.length === 0 || loading}>
-              <ChevronRight size={16} color="#fff" />
-            </Pressable>
-          </View>
+          <Pager canOlder={!!trend?.hasPrevious} canNewer={newer.length > 0} disabled={loading} onOlder={older} onNewer={newerInterval} />
         </View>
         <CategoryChips categories={categories} selected={topId} disabled={loading} onSelect={chooseTop} />
         <View style={styles.card}>
@@ -176,12 +206,15 @@ export default function StatsScreen() {
           )}
         </View>
 
-        <Text style={styles.section}>종목별 추이 (단위: 1,000kg)</Text>
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>종목별 추이 (단위: 1,000kg)</Text>
+          <Pager canOlder={!!axis?.hasPrevious} canNewer={axisNewer.length > 0} disabled={loading} onOlder={olderAxis} onNewer={newerAxis} />
+        </View>
         <CategoryChips
           categories={categories}
           selected={bottomId}
           disabled={loading}
-          onSelect={(id) => guard(() => chooseBottom(id, trend?.dates ?? []))}
+          onSelect={(id) => guard(() => chooseBottom(id))}
         />
         <View style={styles.chips}>
           {bottomId && exercises.length === 0 && !loading && <Text style={styles.empty}>이 부위에 기록한 운동이 없어요</Text>}
@@ -201,7 +234,7 @@ export default function StatsScreen() {
         <View style={styles.card}>
           <LineChart
             series={shown.map((e) => ({ color: colorOf(e.id), values: e.volumes }))}
-            labels={labels}
+            labels={axis?.dates.map(label) ?? []}
             intervals={3}
             plotHeight={150}
             compact
