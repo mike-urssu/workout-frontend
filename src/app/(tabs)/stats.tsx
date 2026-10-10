@@ -62,13 +62,12 @@ export default function StatsScreen() {
   const [topId, setTopId] = useState<string | null>(null);
   const [trend, setTrend] = useState<CategoryTrend | null>(null);
   const [newer, setNewer] = useState<CategoryTrend[]>([]); // intervals we paged past, kept for paging back
-  // Bottom chart: its own body part, the days that part was trained (BR-015), its exercises and their volumes on those days.
+  // Bottom chart: its own body part, its exercises, and the picked ones' volumes on the days they were done (BR-015).
   const [bottomId, setBottomId] = useState<string | null>(null);
-  const [axis, setAxis] = useState<CategoryTrend | null>(null);
-  const [axisNewer, setAxisNewer] = useState<CategoryTrend[]>([]);
   const [exercises, setExercises] = useState<StatsExercise[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [exTrend, setExTrend] = useState<ExerciseTrend | null>(null);
+  const [exNewer, setExNewer] = useState<ExerciseTrend[]>([]);
   const [loading, setLoading] = useState(false);
 
   const guard = async (fn: () => Promise<void>) => {
@@ -82,23 +81,20 @@ export default function StatsScreen() {
     }
   };
 
-  /** Nothing is requested for 0 exercises or no days. */
-  const loadExerciseTrend = async (ids: string[], dates: string[]) =>
-    setExTrend(ids.length && dates.length ? await getExerciseTrend(ids, dates) : null);
+  /** The latest days the picked exercises were done (BR-015); nothing is requested for 0 exercises. */
+  const loadExerciseTrend = async (ids: string[]) => {
+    setExTrend(ids.length ? await getExerciseTrend(ids) : null);
+    setExNewer([]);
+  };
 
-  /**
-   * The exercise list follows the bottom chart's body part, and all its recorded exercises are selected (BR-010, BR-017).
-   * Its axis is the days that part was trained, from the same API as the top chart (BR-015, design DEC-STATS-012).
-   */
-  const chooseBottom = async (id: string, days?: CategoryTrend) => {
+  /** The exercise list follows the bottom chart's body part, and all its recorded exercises are selected (BR-010, BR-017). */
+  const chooseBottom = async (id: string) => {
     setBottomId(id);
-    const [list, a] = await Promise.all([getStatsExercises(id), days ?? getCategoryTrend(id)]);
+    const list = await getStatsExercises(id);
     const ids = list.map((e) => e.id);
     setExercises(list);
     setPicked(ids);
-    setAxis(a);
-    setAxisNewer([]);
-    await loadExerciseTrend(ids, a.dates);
+    await loadExerciseTrend(ids);
   };
 
   // Opening the screen always starts from chest in both charts and the latest interval.
@@ -111,8 +107,7 @@ export default function StatsScreen() {
         const t = await getCategoryTrend(chest.id);
         setTrend(t);
         setNewer([]);
-        setExTrend(null);
-        await chooseBottom(chest.id, t); // both charts start on chest: one response serves both
+        await chooseBottom(chest.id);
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
@@ -142,30 +137,27 @@ export default function StatsScreen() {
     setNewer(newer.slice(0, -1));
   };
 
-  /** The exercise chart pages through its own part's days, keeping the selected exercises (BR-015, BR-016). */
-  const olderAxis = () =>
-    axis?.hasPrevious && bottomId && !loading &&
+  /** The exercise chart pages through the days the picked exercises were done, keeping the selection (BR-015, BR-016). */
+  const olderExercises = () =>
+    exTrend?.hasPrevious && !loading &&
     guard(async () => {
-      const a = await getCategoryTrend(bottomId, axis.dates[axis.dates.length - 1]);
-      setAxisNewer([...axisNewer, axis]);
-      setAxis(a);
-      await loadExerciseTrend(picked, a.dates);
+      const t = await getExerciseTrend(picked, exTrend.dates[exTrend.dates.length - 1]);
+      setExNewer([...exNewer, exTrend]);
+      setExTrend(t);
     });
 
-  const newerAxis = () =>
-    axisNewer.length > 0 && !loading &&
-    guard(async () => {
-      const a = axisNewer[axisNewer.length - 1];
-      setAxisNewer(axisNewer.slice(0, -1));
-      setAxis(a);
-      await loadExerciseTrend(picked, a.dates);
-    });
+  const newerExercises = () => {
+    if (exNewer.length === 0 || loading) return;
+    setExTrend(exNewer[exNewer.length - 1]);
+    setExNewer(exNewer.slice(0, -1));
+  };
 
+  /** A new selection has its own days, so it starts again from the latest ones. */
   const toggle = (id: string) => {
-    if (loading || !axis) return;
+    if (loading) return;
     const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
     setPicked(next);
-    guard(() => loadExerciseTrend(next, axis.dates));
+    guard(() => loadExerciseTrend(next));
   };
 
   const colorOf = (id: string) => LINE_COLORS[Math.max(0, picked.indexOf(id)) % LINE_COLORS.length];
@@ -208,7 +200,7 @@ export default function StatsScreen() {
 
         <View style={styles.sectionRow}>
           <Text style={styles.section}>종목별 추이 (단위: 1,000kg)</Text>
-          <Pager canOlder={!!axis?.hasPrevious} canNewer={axisNewer.length > 0} disabled={loading} onOlder={olderAxis} onNewer={newerAxis} />
+          <Pager canOlder={!!exTrend?.hasPrevious} canNewer={exNewer.length > 0} disabled={loading} onOlder={olderExercises} onNewer={newerExercises} />
         </View>
         <CategoryChips
           categories={categories}
@@ -234,7 +226,7 @@ export default function StatsScreen() {
         <View style={styles.card}>
           <LineChart
             series={shown.map((e) => ({ color: colorOf(e.id), values: e.volumes }))}
-            labels={axis?.dates.map(label) ?? []}
+            labels={exTrend?.dates.map(label) ?? []}
             intervals={3}
             plotHeight={150}
             compact
