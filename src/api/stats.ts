@@ -1,13 +1,13 @@
 import { request } from './client';
 
-// Shapes follow the backend design (workout-stats v0.3). `volumes` line up with `dates`.
-/** One body part: the last (up to) 7 days it was trained and that part's volume (kg) on each. */
+// Shapes follow the backend design (workout-stats v0.7). `volumes` line up with `dates`.
+/** One body part: the last (up to) 12 days it was trained within 3 months of the latest one and that part's volume (kg) on each. */
 export type CategoryTrend = { dates: string[]; volumes: number[]; hasPrevious: boolean };
 export type StatsExercise = { id: string; name: string };
-/** Up to 7 days any of the exercises was done, and each exercise's volume (kg) on them (null = not done that day). */
+/** Up to 12 days (within 3 months) any of the exercises was done, and each exercise's volume (kg) on them (null = not done that day). */
 export type ExerciseTrend = { dates: string[]; exercises: { id: string; name: string; volumes: (number | null)[] }[]; hasPrevious: boolean };
 
-/** Up to 7 days the body part was trained; `before` (exclusive) pages to the older interval. */
+/** Up to 12 days (within 3 months) the body part was trained; `before` (exclusive) pages to the older interval. */
 export const getCategoryTrend = (categoryId: string, before?: string) =>
   request<CategoryTrend>(`/api/v1/stats/category-volumes?categoryId=${categoryId}${before ? `&before=${before}` : ''}`);
 

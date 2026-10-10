@@ -8,6 +8,13 @@ jest.mock('@/api/stats');
 jest.mock('@/api/workout');
 // Screens run outside a navigator here: "focus" is the first render.
 jest.mock('expo-router', () => ({ useFocusEffect: (fn: () => void) => jest.requireActual('react').useEffect(fn, []) }));
+// The charts drag with gesture-handler + Reanimated, which have no native side under jest.
+jest.mock('react-native-worklets', () => jest.requireActual('react-native-worklets/src/mock'));
+jest.mock('react-native-reanimated', () => jest.requireActual('react-native-reanimated/mock'));
+jest.mock('react-native-gesture-handler', () => ({
+  ...jest.requireActual('react-native-gesture-handler'),
+  GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+}));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: jest.requireActual('react-native').View }));
 
 // 가슴 and 하체 trained on different days (a split routine); 벤치프레스 is not done on every 가슴 day.
@@ -35,6 +42,9 @@ beforeEach(() => {
 const pickVolumePart = (name: string) => fireEvent.press(screen.getAllByText(name)[0]);
 const pickExercisePart = (name: string) => fireEvent.press(screen.getAllByText(name)[1]);
 /** Day labels on the exercise chart (the body-part chart is above it with its own). */
+/** Paging, as a screen reader does it on a chart's swipe area (index 0 = body-part chart, 1 = exercise chart). */
+const page = (chart: number, actionName: 'decrement' | 'increment') =>
+  fireEvent(screen.getAllByRole('adjustable')[chart], 'accessibilityAction', { nativeEvent: { actionName } });
 const exerciseLabels = () => screen.getAllByText(/^\d+\/\d+$/).slice(DATES.chest.length).map((t) => t.props.children);
 
 test('picking a body part in the exercise chart shows the days its exercises were done', async () => {
@@ -44,7 +54,7 @@ test('picking a body part in the exercise chart shows the days its exercises wer
   await pickExercisePart('하체');
 
   await screen.findByText('스쿼트');
-  await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['squat']));
+  await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['squat'], undefined));
   expect(screen.getByText('9/2')).toBeOnTheScreen();
   expect(screen.getByText('9/4')).toBeOnTheScreen();
 });
@@ -56,7 +66,7 @@ test('deselecting an exercise narrows the axis to the days the remaining ones we
 
   await fireEvent.press(screen.getByText('펙덱 플라이'));
 
-  await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['bench']));
+  await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['bench'], undefined));
   await waitFor(() => expect(exerciseLabels()).toEqual(['9/1']));
 });
 
@@ -71,23 +81,25 @@ test('changing the body-part chart leaves the exercise chart alone', async () =>
   expect(getExerciseTrend).toHaveBeenCalledTimes(calls);
 });
 
-test('the exercise chart pages back through the days its exercises were done', async () => {
+test('dragging the exercise chart moves one shown day at a time through the older days loaded behind it', async () => {
   jest.mocked(getExerciseTrend).mockImplementation(async (ids, before) =>
-    before === '2026-09-04'
-      ? { dates: ['2026-08-30', '2026-09-02'], exercises: ids.map((id) => ({ id, name: id, volumes: [500, 500] })), hasPrevious: false }
+    before === '2026-09-02'
+      ? { dates: ['2026-08-30'], exercises: ids.map((id) => ({ id, name: id, volumes: [500] })), hasPrevious: false }
       : { dates: DATES.legs, exercises: ids.map((id) => ({ id, name: id, volumes: [500, 500] })), hasPrevious: true });
   await render(<StatsScreen />);
   await screen.findByText('벤치프레스');
   await pickExercisePart('하체');
   await screen.findByText('스쿼트');
 
-  await fireEvent.press(screen.getAllByLabelText('이전 날짜')[1]);
+  // the days before the oldest shown one are loaded up front, so the chart can slide them in
+  await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['squat'], '2026-09-02'));
+  expect(screen.getByText('2026.09.02–09.04')).toBeOnTheScreen();
 
-  await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['squat'], '2026-09-04'));
-  expect(await screen.findByText('8/30')).toBeOnTheScreen();
+  await page(1, 'decrement');
 
-  await fireEvent.press(screen.getAllByLabelText('다음 날짜')[1]);
+  expect(await screen.findByText('2026.08.30–09.02')).toBeOnTheScreen();
 
-  await screen.findByText('9/4');
-  expect(screen.queryByText('8/30')).toBeNull();
+  await page(1, 'increment');
+
+  expect(await screen.findByText('2026.09.02–09.04')).toBeOnTheScreen();
 });

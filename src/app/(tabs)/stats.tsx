@@ -3,9 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import {
-  CategoryTrend, ExerciseTrend, StatsExercise, getCategoryTrend, getExerciseTrend, getStatsExercises,
-} from '@/api/stats';
+import { StatsExercise, getCategoryTrend, getExerciseTrend, getStatsExercises } from '@/api/stats';
 import { Category } from '@/api/workout';
 import { LineChart } from '@/components/line-chart';
 import { Screen } from '@/components/screen';
@@ -16,6 +14,64 @@ import { errorMessage, notify } from '@/lib/dialog';
 // A body part has at most 8 exercises and all of them can be selected, so there are 8 line colours.
 const LINE_COLORS = ['#b2e000', '#668aff', '#cc66ff', '#ff9933', '#ff6b8b', '#2ed3b7', '#ffd23f', '#8fa3b8'];
 const label = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+const dotted = (date: string) => date.replace(/-/g, '.');
+/** The days a chart shows, e.g. 2026.09.22–09.27 (the year again only when it changes); nothing when it shows no day. */
+const period = (dates: string[] = []) => {
+  if (dates.length === 0) return null;
+  const [first, last] = [dates[0], dates[dates.length - 1]];
+  if (first === last) return dotted(first);
+  return `${dotted(first)}–${dotted(first.slice(0, 4) === last.slice(0, 4) ? last.slice(5) : last)}`;
+};
+
+/** One chart's days loaded so far, oldest first; each series' values line up with `dates`. */
+type Strip = { dates: string[]; series: { id: string; name: string; values: (number | null)[] }[]; hasPrevious: boolean };
+/** The days before `before` (exclusive), or the latest ones. */
+type Page = (before?: string) => Promise<Strip>;
+/** Older days go in front; a series the older page does not have is empty there. */
+const prepend = (older: Strip, strip: Strip): Strip => ({
+  dates: [...older.dates, ...strip.dates],
+  series: strip.series.map((s) => ({
+    ...s,
+    values: [...(older.series.find((o) => o.id === s.id)?.values ?? older.dates.map(() => null)), ...s.values],
+  })),
+  hasPrevious: older.hasPrevious,
+});
+
+/**
+ * One chart's strip of days and where it is scrolled to. The latest page decides how many days fit on screen
+ * (up to 12 within 3 months, BR-004, BR-021); dragging then moves one shown day at a time (BR-016).
+ */
+function useStrip(guard: (fn: () => Promise<void>) => void) {
+  const [view, setView] = useState<{ strip: Strip; visible: number; fromEnd: number; serial: number } | null>(null);
+
+  /** Keep a screenful of older days loaded behind the shown ones, so a drag can slide them in. */
+  const fill = async (page: Page, strip: Strip, visible: number, fromEnd: number) => {
+    if (!strip.hasPrevious || strip.dates.length - visible - fromEnd >= visible) return;
+    const before = strip.dates[0];
+    const older = await page(before);
+    // dropped when the chart was reloaded meanwhile
+    setView((v) => (v && v.strip.dates[0] === before ? { ...v, strip: prepend(older, v.strip) } : v));
+  };
+
+  /** The latest days, e.g. for a new selection; null clears the chart. */
+  const load = async (page: Page | null) => {
+    if (!page) return setView(null);
+    const strip = await page();
+    setView((v) => ({ strip, visible: strip.dates.length, fromEnd: 0, serial: (v?.serial ?? 0) + 1 }));
+    await fill(page, strip, strip.dates.length, 0);
+  };
+
+  const move = (page: Page, fromEnd: number) => {
+    if (!view) return;
+    setView((v) => v && { ...v, fromEnd });
+    if (view.strip.hasPrevious && view.strip.dates.length - view.visible - fromEnd < view.visible) {
+      guard(() => fill(page, view.strip, view.visible, fromEnd));
+    }
+  };
+
+  const shownDates = view ? view.strip.dates.slice(view.strip.dates.length - view.visible - view.fromEnd, view.strip.dates.length - view.fromEnd) : [];
+  return { view, load, move, shownDates };
+}
 
 /** Single-select body-part chips (both charts have their own). */
 function CategoryChips({ categories, selected, disabled, onSelect }: {
@@ -40,36 +96,20 @@ function CategoryChips({ categories, selected, disabled, onSelect }: {
   );
 }
 
-/** ‹ pages to older days, › back to the newer ones already seen (BR-016, design DEC-STATS-003). */
-function Pager({ canOlder, canNewer, disabled, onOlder, onNewer }: {
-  canOlder: boolean; canNewer: boolean; disabled: boolean; onOlder: () => void; onNewer: () => void;
-}) {
+/** The days a chart shows, next to its title (each chart pages on its own, TODO-020). */
+function SectionTitle({ title, dates }: { title: string; dates?: string[] }) {
+  const range = period(dates);
   return (
-    <View style={styles.pager}>
-      <Pressable accessibilityLabel="이전 날짜" style={[styles.pageBtn, !canOlder && styles.pageOff]} onPress={onOlder} disabled={!canOlder || disabled}>
-        <ChevronLeft size={16} color="#fff" />
-      </Pressable>
-      <Pressable accessibilityLabel="다음 날짜" style={[styles.pageBtn, !canNewer && styles.pageOff]} onPress={onNewer} disabled={!canNewer || disabled}>
-        <ChevronRight size={16} color="#fff" />
-      </Pressable>
+    <View style={styles.sectionRow}>
+      <Text style={styles.section}>{title}</Text>
+      {range && <Text style={styles.period}>{range}</Text>}
     </View>
   );
 }
 
 export default function StatsScreen() {
   const categories = useCategories();
-  // Top chart: one body part's volume per day it was trained.
-  const [topId, setTopId] = useState<string | null>(null);
-  const [trend, setTrend] = useState<CategoryTrend | null>(null);
-  const [newer, setNewer] = useState<CategoryTrend[]>([]); // intervals we paged past, kept for paging back
-  // Bottom chart: its own body part, its exercises, and the picked ones' volumes on the days they were done (BR-015).
-  const [bottomId, setBottomId] = useState<string | null>(null);
-  const [exercises, setExercises] = useState<StatsExercise[]>([]);
-  const [picked, setPicked] = useState<string[]>([]);
-  const [exTrend, setExTrend] = useState<ExerciseTrend | null>(null);
-  const [exNewer, setExNewer] = useState<ExerciseTrend[]>([]);
   const [loading, setLoading] = useState(false);
-
   const guard = async (fn: () => Promise<void>) => {
     setLoading(true);
     try {
@@ -80,12 +120,27 @@ export default function StatsScreen() {
       setLoading(false);
     }
   };
+  // Top chart: one body part's volume per day it was trained.
+  const [topId, setTopId] = useState<string | null>(null);
+  const top = useStrip(guard);
+  // Bottom chart: its own body part, its exercises, and the picked ones' volumes on the days they were done (BR-015).
+  const [bottomId, setBottomId] = useState<string | null>(null);
+  const [exercises, setExercises] = useState<StatsExercise[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const bottom = useStrip(guard);
 
-  /** The latest days the picked exercises were done (BR-015); nothing is requested for 0 exercises. */
-  const loadExerciseTrend = async (ids: string[]) => {
-    setExTrend(ids.length ? await getExerciseTrend(ids) : null);
-    setExNewer([]);
+  const topPage = (id: string): Page => async (before) => {
+    const t = await getCategoryTrend(id, before);
+    return { dates: t.dates, series: [{ id, name: '', values: t.volumes }], hasPrevious: t.hasPrevious };
   };
+  /** The days any of the exercises was done (BR-015); nothing is requested for 0 exercises. */
+  const bottomPage = (ids: string[]): Page | null =>
+    ids.length
+      ? async (before) => {
+          const t = await getExerciseTrend(ids, before);
+          return { dates: t.dates, series: t.exercises.map((e) => ({ id: e.id, name: e.name, values: e.volumes })), hasPrevious: t.hasPrevious };
+        }
+      : null;
 
   /** The exercise list follows the bottom chart's body part, and all its recorded exercises are selected (BR-010, BR-017). */
   const chooseBottom = async (id: string) => {
@@ -94,76 +149,41 @@ export default function StatsScreen() {
     const ids = list.map((e) => e.id);
     setExercises(list);
     setPicked(ids);
-    await loadExerciseTrend(ids);
+    await bottom.load(bottomPage(ids));
   };
 
-  // Opening the screen always starts from chest in both charts and the latest interval.
+  // Opening the screen always starts from chest in both charts and the latest days.
   useFocusEffect(
     useCallback(() => {
       guard(async () => {
         const chest = (await loadCategories())[0];
         if (!chest) return;
         setTopId(chest.id);
-        const t = await getCategoryTrend(chest.id);
-        setTrend(t);
-        setNewer([]);
+        await top.load(topPage(chest.id));
         await chooseBottom(chest.id);
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
 
-  /** Changing the top chart's part starts from its latest interval (TODO-014); the exercise chart keeps its own days (BR-015). */
+  /** Changing the top chart's part starts from its latest days (TODO-014); the exercise chart keeps its own (BR-015). */
   const chooseTop = (id: string) =>
     guard(async () => {
-      const t = await getCategoryTrend(id);
       setTopId(id);
-      setTrend(t);
-      setNewer([]);
+      await top.load(topPage(id));
     });
-
-  const older = () =>
-    trend?.hasPrevious && topId && !loading &&
-    guard(async () => {
-      // before = the latest day shown, so the interval slides back by one day (BR-016)
-      const t = await getCategoryTrend(topId, trend.dates[trend.dates.length - 1]);
-      setNewer([...newer, trend]);
-      setTrend(t);
-    });
-
-  const newerInterval = () => {
-    if (newer.length === 0 || loading) return;
-    setTrend(newer[newer.length - 1]);
-    setNewer(newer.slice(0, -1));
-  };
-
-  /** The exercise chart pages through the days the picked exercises were done, keeping the selection (BR-015, BR-016). */
-  const olderExercises = () =>
-    exTrend?.hasPrevious && !loading &&
-    guard(async () => {
-      const t = await getExerciseTrend(picked, exTrend.dates[exTrend.dates.length - 1]);
-      setExNewer([...exNewer, exTrend]);
-      setExTrend(t);
-    });
-
-  const newerExercises = () => {
-    if (exNewer.length === 0 || loading) return;
-    setExTrend(exNewer[exNewer.length - 1]);
-    setExNewer(exNewer.slice(0, -1));
-  };
 
   /** A new selection has its own days, so it starts again from the latest ones. */
   const toggle = (id: string) => {
     if (loading) return;
     const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
     setPicked(next);
-    guard(() => loadExerciseTrend(next));
+    guard(() => bottom.load(bottomPage(next)));
   };
 
   const colorOf = (id: string) => LINE_COLORS[Math.max(0, picked.indexOf(id)) % LINE_COLORS.length];
   // The previous response stays on screen until the new one arrives; draw only what is still selected.
-  const shown = (exTrend?.exercises ?? []).filter((e) => picked.includes(e.id));
-  const labels = trend?.dates.map(label) ?? [];
+  const shown = (bottom.view?.strip.series ?? []).filter((e) => picked.includes(e.id));
   const topCategory = categories.find((c) => c.id === topId);
   const topColor = styleOf(topCategory?.name ?? '')?.color ?? Palette.accent;
 
@@ -175,19 +195,34 @@ export default function StatsScreen() {
           <Text style={styles.subtitle}>부위별, 종목별 볼륨 추이</Text>
         </View>
 
-        <View style={styles.sectionRow}>
-          <Text style={styles.section}>부위별 볼륨 추이 (단위: 1,000kg)</Text>
-          <Pager canOlder={!!trend?.hasPrevious} canNewer={newer.length > 0} disabled={loading} onOlder={older} onNewer={newerInterval} />
+        <View style={styles.periodControls}>
+          <View style={styles.periodHint}>
+            <Text style={styles.periodHintText}>최대 3개월 · 최대 12개 지점</Text>
+          </View>
+          <View style={styles.swipeHint}>
+            <View style={styles.swipeIcon}>
+              <ChevronLeft size={12} color="rgba(255,255,255,0.4)" />
+              <ChevronRight size={12} color="rgba(255,255,255,0.4)" />
+            </View>
+            <Text style={styles.swipeHintText}>좌우로 밀어 날짜 단위로 이동하면 최대 3개월 범위 안에서 최대 12개 지점으로 추이를 확인할 수 있어요.</Text>
+          </View>
         </View>
+
+        <SectionTitle title="부위별 볼륨 추이 (단위: 1,000kg)" dates={top.shownDates} />
         <CategoryChips categories={categories} selected={topId} disabled={loading} onSelect={chooseTop} />
         <View style={styles.card}>
           <LineChart
-            series={trend && trend.dates.length ? [{ color: topColor, values: trend.volumes }] : []}
-            labels={labels}
+            key={top.view?.serial}
+            series={(top.view?.strip.series ?? []).map((x) => ({ color: topColor, values: x.values }))}
+            labels={top.view?.strip.dates.map(label) ?? []}
+            visible={top.view?.visible ?? 0}
+            fromEnd={top.view?.fromEnd ?? 0}
+            onMove={(to) => topId && top.move(topPage(topId), to)}
+            name="부위별 볼륨 추이 그래프"
             intervals={4}
             plotHeight={200}
           />
-          {trend && trend.dates.length === 0 && <Text style={styles.empty}>이 부위의 운동 기록이 없어요</Text>}
+          {top.view && top.view.strip.dates.length === 0 && <Text style={styles.empty}>이 부위의 운동 기록이 없어요</Text>}
           {topCategory && (
             <View style={styles.legend}>
               <View style={styles.legendItem}>
@@ -198,10 +233,7 @@ export default function StatsScreen() {
           )}
         </View>
 
-        <View style={styles.sectionRow}>
-          <Text style={styles.section}>종목별 추이 (단위: 1,000kg)</Text>
-          <Pager canOlder={!!exTrend?.hasPrevious} canNewer={exNewer.length > 0} disabled={loading} onOlder={olderExercises} onNewer={newerExercises} />
-        </View>
+        <SectionTitle title="종목별 추이 (단위: 1,000kg)" dates={bottom.shownDates} />
         <CategoryChips
           categories={categories}
           selected={bottomId}
@@ -225,8 +257,16 @@ export default function StatsScreen() {
         </View>
         <View style={styles.card}>
           <LineChart
-            series={shown.map((e) => ({ color: colorOf(e.id), values: e.volumes }))}
-            labels={exTrend?.dates.map(label) ?? []}
+            key={bottom.view?.serial}
+            series={shown.map((e) => ({ color: colorOf(e.id), values: e.values }))}
+            labels={bottom.view?.strip.dates.map(label) ?? []}
+            visible={bottom.view?.visible ?? 0}
+            fromEnd={bottom.view?.fromEnd ?? 0}
+            onMove={(to) => {
+              const page = bottomPage(picked);
+              if (page) bottom.move(page, to);
+            }}
+            name="종목별 추이 그래프"
             intervals={3}
             plotHeight={150}
             compact
@@ -250,12 +290,16 @@ const styles = StyleSheet.create({
   title: { fontFamily: Font.outfit.bold, fontSize: 22, color: '#fff' },
   subtitle: { fontFamily: Font.manrope.regular, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
   sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
-  pager: { flexDirection: 'row', gap: 8 },
-  pageBtn: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: '#26262b', borderWidth: 1,
-    borderColor: Palette.border, alignItems: 'center', justifyContent: 'center',
+  period: { fontFamily: Font.manrope.semibold, fontSize: 12, color: '#9a9aa6', marginTop: 12 },
+  periodControls: { gap: 12, marginTop: 4 },
+  periodHint: {
+    alignSelf: 'flex-start', backgroundColor: '#26262b', borderWidth: 1, borderColor: Palette.border,
+    borderRadius: 100, paddingHorizontal: 10, paddingVertical: 6,
   },
-  pageOff: { opacity: 0.3 },
+  periodHintText: { fontFamily: Font.manrope.semibold, fontSize: 11, color: 'rgba(255,255,255,0.6)' },
+  swipeHint: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  swipeIcon: { flexDirection: 'row', gap: 4 },
+  swipeHintText: { flex: 1, fontFamily: Font.manrope.regular, fontSize: 12, color: 'rgba(255,255,255,0.4)' },
   section: { fontFamily: Font.outfit.bold, fontSize: 16, color: '#fff', marginTop: 12 },
   card: { backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, borderRadius: 20, padding: 16, gap: 12 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
