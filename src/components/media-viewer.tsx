@@ -1,13 +1,17 @@
+import { File, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
+import { Asset, requestPermissionsAsync } from 'expo-media-library';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { CircleX } from 'lucide-react-native';
+import { CircleX, Download } from 'lucide-react-native';
 import { useRef, useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { FlatList, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { authHeaders } from '@/api/client';
 import { Font, Palette } from '@/constants/theme';
-import { MediaItem } from '@/api/workout';
+import { MediaItem, fileUrl } from '@/api/workout';
 import { useFileSource } from '@/hooks/use-file-source';
+import { notify } from '@/lib/dialog';
 
 type Props = { media: MediaItem[]; startIndex: number; visible: boolean; onClose: () => void };
 
@@ -48,6 +52,7 @@ export function MediaViewer({ media, startIndex, visible, onClose }: Props) {
               <View style={{ width, alignItems: 'center' }}>
                 <View style={styles.frame}>
                   <Item item={item} active={visible && i === index} />
+                  <DownloadButton item={item} />
                 </View>
               </View>
             )}
@@ -71,6 +76,47 @@ function Item({ item, active }: { item: MediaItem; active: boolean }) {
   return <Image source={original ?? preview} placeholder={preview ?? undefined} style={styles.fill} contentFit="cover" />;
 }
 
+const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
+
+/** Saves the original to the photo library (web: a browser download). */
+async function download(item: MediaItem) {
+  const name = `${item.id}.${EXT[item.contentType] ?? 'bin'}`;
+  const headers = await authHeaders();
+  if (Platform.OS === 'web') {
+    const res = await fetch(fileUrl(item.originalUrl), { headers });
+    if (!res.ok) throw new Error(String(res.status));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(await res.blob());
+    a.download = name;
+    a.click();
+    return URL.revokeObjectURL(a.href);
+  }
+  if ((await requestPermissionsAsync(true)).status !== 'granted') return notify('사진 앱에 저장하려면 설정에서 사진 접근을 허용해 주세요.');
+  const file = await File.downloadFileAsync(fileUrl(item.originalUrl), new File(Paths.cache, name), { headers, idempotent: true });
+  await Asset.create(file.uri);
+  file.delete();
+  notify('사진 앱에 저장했어요.');
+}
+
+function DownloadButton({ item }: { item: MediaItem }) {
+  const [busy, setBusy] = useState(false);
+  const onPress = async () => {
+    setBusy(true);
+    try {
+      await download(item);
+    } catch {
+      notify('저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Pressable style={[styles.download, busy && { opacity: 0.5 }]} onPress={onPress} disabled={busy} hitSlop={8} accessibilityLabel="다운로드">
+      <Download size={16} color={Palette.accent} />
+    </Pressable>
+  );
+}
+
 function Video({ source, active }: { source: { uri: string; headers?: Record<string, string> }; active: boolean }) {
   const player = useVideoPlayer(source, (p) => { p.loop = true; });
   if (active) player.play(); else player.pause();
@@ -91,6 +137,10 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.63, shadowRadius: 32, shadowOffset: { width: 0, height: 12 },
   },
   fill: { width: '100%', height: '100%' },
+  download: {
+    position: 'absolute', top: 10.5, right: 10.5, width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, alignItems: 'center', justifyContent: 'center',
+  },
   dots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, height: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
   dotActive: { width: 16, height: 6, borderRadius: 3, backgroundColor: Palette.accent },

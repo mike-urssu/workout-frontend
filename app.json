@@ -35,6 +35,12 @@
         }
       ],
       "expo-video",
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "오운완 인증 사진·동영상을 사진 앱에 저장하려면 권한이 필요해요."
+        }
+      ],
       "expo-secure-store"
     ],
     "experiments": {
