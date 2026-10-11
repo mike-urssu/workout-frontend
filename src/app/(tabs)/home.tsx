@@ -320,7 +320,8 @@ function mediaMessage(e: unknown) {
         : limit === 'DURATION' ? '동영상은 1분까지 올릴 수 있어요.'
         : '사진은 20MB, 동영상은 100MB까지 올릴 수 있어요.';
     }
-    if (e.status === 503 || e.status === 0) return '올리지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.';
+    if (e.status === 503) return '서버에 저장하지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.';
+    if (e.status === 0) return '네트워크 문제로 올리지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.';
     if (e.code === 'WORKOUT_SESSION_HAS_NO_SETS') return '세트를 하나 이상 기록해야 운동을 완료할 수 있어요.';
   }
   return errorMessage(e);
