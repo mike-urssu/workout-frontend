@@ -93,13 +93,14 @@ test('dragging the exercise chart moves one shown day at a time through the olde
 
   // the days before the oldest shown one are loaded up front, so the chart can slide them in
   await waitFor(() => expect(getExerciseTrend).toHaveBeenLastCalledWith(['squat'], '2026-09-02'));
-  expect(screen.getByText('2026.09.02–09.04')).toBeOnTheScreen();
+  const chart = () => screen.getAllByRole('adjustable')[1];
+  expect(chart()).toHaveAccessibilityValue({ text: '9/2–9/4' });
 
   await page(1, 'decrement');
 
-  expect(await screen.findByText('2026.08.30–09.02')).toBeOnTheScreen();
+  await waitFor(() => expect(chart()).toHaveAccessibilityValue({ text: '8/30–9/2' }));
 
   await page(1, 'increment');
 
-  expect(await screen.findByText('2026.09.02–09.04')).toBeOnTheScreen();
+  await waitFor(() => expect(chart()).toHaveAccessibilityValue({ text: '9/2–9/4' }));
 });

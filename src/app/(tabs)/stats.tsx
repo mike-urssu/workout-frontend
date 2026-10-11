@@ -1,5 +1,4 @@
 import { useFocusEffect } from 'expo-router';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -14,14 +13,6 @@ import { errorMessage, notify } from '@/lib/dialog';
 // A body part has at most 8 exercises and all of them can be selected, so there are 8 line colours.
 const LINE_COLORS = ['#b2e000', '#668aff', '#cc66ff', '#ff9933', '#ff6b8b', '#2ed3b7', '#ffd23f', '#8fa3b8'];
 const label = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
-const dotted = (date: string) => date.replace(/-/g, '.');
-/** The days a chart shows, e.g. 2026.09.22–09.27 (the year again only when it changes); nothing when it shows no day. */
-const period = (dates: string[] = []) => {
-  if (dates.length === 0) return null;
-  const [first, last] = [dates[0], dates[dates.length - 1]];
-  if (first === last) return dotted(first);
-  return `${dotted(first)}–${dotted(first.slice(0, 4) === last.slice(0, 4) ? last.slice(5) : last)}`;
-};
 
 /** One chart's days loaded so far, oldest first; each series' values line up with `dates`. */
 type Strip = { dates: string[]; series: { id: string; name: string; values: (number | null)[] }[]; hasPrevious: boolean };
@@ -69,8 +60,7 @@ function useStrip(guard: (fn: () => Promise<void>) => void) {
     }
   };
 
-  const shownDates = view ? view.strip.dates.slice(view.strip.dates.length - view.visible - view.fromEnd, view.strip.dates.length - view.fromEnd) : [];
-  return { view, load, move, shownDates };
+  return { view, load, move };
 }
 
 /** Single-select body-part chips (both charts have their own). */
@@ -92,17 +82,6 @@ function CategoryChips({ categories, selected, disabled, onSelect }: {
           </Pressable>
         );
       })}
-    </View>
-  );
-}
-
-/** The days a chart shows, next to its title (each chart pages on its own, TODO-020). */
-function SectionTitle({ title, dates }: { title: string; dates?: string[] }) {
-  const range = period(dates);
-  return (
-    <View style={styles.sectionRow}>
-      <Text style={styles.section}>{title}</Text>
-      {range && <Text style={styles.period}>{range}</Text>}
     </View>
   );
 }
@@ -192,20 +171,7 @@ export default function StatsScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>운동 통계</Text>
 
-        <View style={styles.periodControls}>
-          <View style={styles.periodHint}>
-            <Text style={styles.periodHintText}>최대 3개월 · 최대 12개 지점</Text>
-          </View>
-          <View style={styles.swipeHint}>
-            <View style={styles.swipeIcon}>
-              <ChevronLeft size={12} color="rgba(255,255,255,0.4)" />
-              <ChevronRight size={12} color="rgba(255,255,255,0.4)" />
-            </View>
-            <Text style={styles.swipeHintText}>좌우로 밀어 날짜 단위로 이동하면 최대 3개월 범위 안에서 최대 12개 지점으로 추이를 확인할 수 있어요.</Text>
-          </View>
-        </View>
-
-        <SectionTitle title="부위별 볼륨 추이 (단위: 1,000kg)" dates={top.shownDates} />
+        <Text style={styles.section}>부위별 볼륨 추이 (단위: 1,000kg)</Text>
         <CategoryChips categories={categories} selected={topId} disabled={loading} onSelect={chooseTop} />
         <View style={styles.card}>
           <LineChart
@@ -230,7 +196,7 @@ export default function StatsScreen() {
           )}
         </View>
 
-        <SectionTitle title="종목별 추이 (단위: 1,000kg)" dates={bottom.shownDates} />
+        <Text style={styles.section}>종목별 추이 (단위: 1,000kg)</Text>
         <CategoryChips
           categories={categories}
           selected={bottomId}
@@ -285,17 +251,6 @@ export default function StatsScreen() {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32, gap: 12 },
   title: { fontFamily: Font.outfit.bold, fontSize: 22, color: '#fff' },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
-  period: { fontFamily: Font.manrope.semibold, fontSize: 12, color: '#9a9aa6', marginTop: 12 },
-  periodControls: { gap: 12, marginTop: 4 },
-  periodHint: {
-    alignSelf: 'flex-start', backgroundColor: '#26262b', borderWidth: 1, borderColor: Palette.border,
-    borderRadius: 100, paddingHorizontal: 10, paddingVertical: 6,
-  },
-  periodHintText: { fontFamily: Font.manrope.semibold, fontSize: 11, color: 'rgba(255,255,255,0.6)' },
-  swipeHint: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  swipeIcon: { flexDirection: 'row', gap: 4 },
-  swipeHintText: { flex: 1, fontFamily: Font.manrope.regular, fontSize: 12, color: 'rgba(255,255,255,0.4)' },
   section: { fontFamily: Font.outfit.bold, fontSize: 16, color: '#fff', marginTop: 12 },
   card: { backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, borderRadius: 20, padding: 16, gap: 12 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },

@@ -95,6 +95,7 @@ export function LineChart({ series, labels, visible, fromEnd, onMove, name, inte
           accessible
           accessibilityRole="adjustable"
           accessibilityLabel={name}
+          accessibilityValue={total ? { text: `${labels[end - shown]}–${labels[end - 1]}` } : undefined}
           accessibilityActions={[{ name: 'decrement', label: '이전 날짜' }, { name: 'increment', label: '다음 날짜' }]}
           onAccessibilityAction={(e) =>
             onMove(e.nativeEvent.actionName === 'decrement' ? Math.min(fromEnd + 1, last) : Math.max(fromEnd - 1, 0))
