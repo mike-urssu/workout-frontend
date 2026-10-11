@@ -2,9 +2,9 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { Camera, LogOut, Play, X } from 'lucide-react-native';
+import { Camera, LogOut } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
@@ -198,6 +198,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   const [picked, setPicked] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [uploaded, setUploaded] = useState<Record<string, string>>({}); // asset uri -> media id, kept for retries
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -235,7 +236,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
       await completeSession(session.id, ids);
       setPicked([]);
       setUploaded({});
-      onDone();
+      setSaved(true);
     } catch (e) {
       notify(mediaMessage(e));
       if (e instanceof ApiError && ['WORKOUT_SESSION_NOT_EDITABLE', 'WORKOUT_SESSION_ALREADY_COMPLETED', 'WORKOUT_SESSION_NOT_FOUND', 'WORKOUT_SESSION_HAS_NO_SETS'].includes(e.code)) onDone();
@@ -262,22 +263,23 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
 
         <GroupBreakdown groups={sessionBreakdown(session)} bg={Palette.inset} />
 
-        <Text style={styles.mediaLabel}>오운완 인증</Text>
-        <Pressable style={styles.upload} onPress={pick} disabled={saving || picked.length >= MAX_MEDIA}>
-          <View style={styles.cameraBg}>
-            <Camera size={20} color={Palette.accent} />
+        <View style={styles.media}>
+          <View style={styles.mediaHeader}>
+            <Text style={styles.mediaLabel}>오운완 인증</Text>
+            <Text style={styles.mediaCount}>{`${picked.length}/${MAX_MEDIA}`}</Text>
           </View>
-          <Text style={styles.uploadText}>
-            {picked.length ? `${picked.length}개 선택됨 · 사진 또는 동영상 추가` : '사진 또는 동영상 추가'}
-          </Text>
-        </Pressable>
-        {picked.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {picked.map((a) => (
-              <PickedThumb key={a.uri} asset={a} disabled={saving} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
-            ))}
-          </ScrollView>
-        )}
+          <Pressable style={styles.upload} onPress={pick} disabled={saving || picked.length >= MAX_MEDIA}>
+            <View style={styles.cameraBg}>
+              <Camera size={20} color={Palette.accent} />
+            </View>
+            <Text style={styles.uploadText}>사진 또는 동영상 추가</Text>
+          </Pressable>
+          <View style={styles.thumbs}>
+            {Array.from({ length: MAX_MEDIA }, (_, i) => picked[i]).map((a, i) => a
+              ? <PickedThumb key={a.uri} asset={a} disabled={saving} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
+              : <View key={`empty-${i}`} style={[styles.thumb, styles.thumbEmpty]} />)}
+          </View>
+        </View>
       </ScrollView>
 
       <View style={styles.actions}>
@@ -288,6 +290,23 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
           <Text style={[styles.ctaText, { color: Palette.accent }]}>건너뛰기</Text>
         </Pressable>
       </View>
+
+      <Modal visible={saved} transparent animationType="fade" onRequestClose={() => { setSaved(false); onDone(); }}>
+        <View style={styles.savedRoot}>
+          <View style={styles.savedCard}>
+            <View style={styles.savedBody}>
+              <Image source={require('@/assets/images/save-success.svg')} style={{ width: 56, height: 56 }} />
+              <View style={{ gap: 10, alignSelf: 'stretch' }}>
+                <Text style={styles.savedTitle}>운동 기록을 저장했어요!</Text>
+                <Text style={styles.savedText}>{'오늘도 끝까지 해냈네요.\n차곡차곡 쌓이는 노력, 정말 멋져요!'}</Text>
+              </View>
+            </View>
+            <Pressable style={[styles.actionBtn, styles.ctaFilled, { alignSelf: 'stretch' }]} onPress={() => { setSaved(false); onDone(); }}>
+              <Text style={[styles.ctaText, { color: Palette.bg }]}>확인</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </Sheet>
   );
 }
@@ -296,9 +315,13 @@ function PickedThumb({ asset, disabled, onRemove }: { asset: ImagePicker.ImagePi
   return (
     <View style={styles.thumb}>
       {asset.type === 'video' ? <VideoThumb uri={asset.uri} /> : <Image source={asset.uri} style={StyleSheet.absoluteFill} contentFit="cover" />}
-      {asset.type === 'video' && <View style={styles.play} pointerEvents="none"><Play size={12} color="#fff" /></View>}
-      <Pressable style={styles.thumbRemove} onPress={onRemove} disabled={disabled} hitSlop={6} accessibilityLabel="첨부 삭제">
-        <X size={12} color="#fff" />
+      {asset.type === 'video' && (
+        <View style={styles.videoDim} pointerEvents="none">
+          <Image source={require('@/assets/images/media-play.svg')} style={{ width: 28, height: 28 }} />
+        </View>
+      )}
+      <Pressable style={styles.thumbRemove} onPress={onRemove} disabled={disabled} hitSlop={8} accessibilityLabel="첨부 삭제">
+        <Text style={styles.thumbRemoveText}>×</Text>
       </Pressable>
     </View>
   );
@@ -387,16 +410,30 @@ const styles = StyleSheet.create({
   },
   volumeLabel: { fontFamily: Font.manrope.bold, fontSize: 14, color: Palette.muted },
   volumeValue: { fontFamily: Font.outfit.extrabold, fontSize: 36, color: Palette.accent },
-  mediaLabel: { fontFamily: Font.outfit.bold, fontSize: 14, color: Palette.muted, marginBottom: -12 },
+  media: { gap: 8 },
+  mediaHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  mediaLabel: { fontFamily: Font.outfit.bold, fontSize: 14, color: Palette.muted },
+  mediaCount: { fontFamily: Font.manrope.bold, fontSize: 13, color: Palette.accent },
   upload: {
     backgroundColor: Palette.inset, borderWidth: 1, borderColor: Palette.accent, borderStyle: 'dashed',
-    borderRadius: 16, paddingVertical: 24, paddingHorizontal: 16, alignItems: 'center', gap: 8,
+    borderRadius: 16, paddingVertical: 8, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
   },
   cameraBg: { backgroundColor: 'rgba(178,224,0,0.1)', padding: 10, borderRadius: 100 },
   uploadText: { fontFamily: Font.manrope.semibold, fontSize: 14, color: Palette.accent },
-  thumb: { width: 80, height: 80, borderRadius: 16, overflow: 'hidden', backgroundColor: Palette.inset, borderWidth: 1, borderColor: Palette.border, alignItems: 'center', justifyContent: 'center' },
-  play: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  thumbRemove: { position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
+  thumbs: { flexDirection: 'row', gap: 5 },
+  thumb: { flex: 1, aspectRatio: 1, borderRadius: 12, overflow: 'hidden' },
+  thumbEmpty: { backgroundColor: Palette.inset, borderWidth: 1, borderColor: Palette.border },
+  videoDim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+  thumbRemove: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: Palette.border, alignItems: 'center', justifyContent: 'center' },
+  thumbRemoveText: { fontFamily: Font.manrope.bold, fontSize: 12, color: Palette.muted },
+  savedRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', paddingHorizontal: 24 },
+  savedCard: {
+    backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, borderRadius: 24,
+    padding: 24, gap: 24, alignItems: 'center',
+  },
+  savedBody: { gap: 16, alignItems: 'center', alignSelf: 'stretch' },
+  savedTitle: { fontFamily: Font.outfit.bold, fontSize: 22, lineHeight: 30, color: '#fff', textAlign: 'center' },
+  savedText: { fontFamily: Font.manrope.regular, fontSize: 14, lineHeight: 22, color: Palette.muted, textAlign: 'center' },
   actions: { gap: 12, paddingTop: 12 },
   actionBtn: { height: 55, borderRadius: 100, alignItems: 'center', justifyContent: 'center' },
 });
