@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { Camera, LogOut } from 'lucide-react-native';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { Camera, LogOut, Play, X } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -191,7 +192,7 @@ type CompleteProps = {
   onDone: () => void;
 };
 
-const MAX_MEDIA = 10;
+const MAX_MEDIA = 5;
 
 function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteProps) {
   const [picked, setPicked] = useState<ImagePicker.ImagePickerAsset[]>([]);
@@ -270,6 +271,13 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
             {picked.length ? `${picked.length}개 선택됨 · 사진 또는 동영상 추가` : '사진 또는 동영상 추가'}
           </Text>
         </Pressable>
+        {picked.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {picked.map((a) => (
+              <PickedThumb key={a.uri} asset={a} disabled={saving} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
+            ))}
+          </ScrollView>
+        )}
       </ScrollView>
 
       <View style={styles.actions}>
@@ -284,13 +292,31 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   );
 }
 
+function PickedThumb({ asset, disabled, onRemove }: { asset: ImagePicker.ImagePickerAsset; disabled: boolean; onRemove: () => void }) {
+  return (
+    <View style={styles.thumb}>
+      {asset.type === 'video' ? <VideoThumb uri={asset.uri} /> : <Image source={asset.uri} style={StyleSheet.absoluteFill} contentFit="cover" />}
+      {asset.type === 'video' && <View style={styles.play} pointerEvents="none"><Play size={12} color="#fff" /></View>}
+      <Pressable style={styles.thumbRemove} onPress={onRemove} disabled={disabled} hitSlop={6} accessibilityLabel="첨부 삭제">
+        <X size={12} color="#fff" />
+      </Pressable>
+    </View>
+  );
+}
+
+/** Paused player shows the first frame. */
+function VideoThumb({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => { p.muted = true; });
+  return <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} pointerEvents="none" />;
+}
+
 /** Upload / complete failures (workout-media design 4.2). */
 function mediaMessage(e: unknown) {
   if (e instanceof ApiError) {
     if (e.code === 'MEDIA_UNSUPPORTED_TYPE') return '지원하지 않는 파일이에요. 사진은 JPEG·PNG·HEIC, 동영상은 MP4·MOV만 가능해요.';
     if (e.code === 'MEDIA_LIMIT_EXCEEDED') {
       const limit = e.details?.limit;
-      return limit === 'COUNT' ? '사진·동영상은 10개까지 올릴 수 있어요.'
+      return limit === 'COUNT' ? `사진·동영상은 ${MAX_MEDIA}개까지 올릴 수 있어요.`
         : limit === 'DURATION' ? '동영상은 1분까지 올릴 수 있어요.'
         : '사진은 20MB, 동영상은 100MB까지 올릴 수 있어요.';
     }
@@ -367,6 +393,9 @@ const styles = StyleSheet.create({
   },
   cameraBg: { backgroundColor: 'rgba(178,224,0,0.1)', padding: 10, borderRadius: 100 },
   uploadText: { fontFamily: Font.manrope.semibold, fontSize: 14, color: Palette.accent },
+  thumb: { width: 80, height: 80, borderRadius: 16, overflow: 'hidden', backgroundColor: Palette.inset, borderWidth: 1, borderColor: Palette.border, alignItems: 'center', justifyContent: 'center' },
+  play: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  thumbRemove: { position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   actions: { gap: 12, paddingTop: 12 },
   actionBtn: { height: 55, borderRadius: 100, alignItems: 'center', justifyContent: 'center' },
 });
