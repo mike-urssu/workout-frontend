@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { Platform } from 'react-native';
 
 import { ApiError, BASE_URL, request } from './client';
@@ -70,7 +71,7 @@ export const clearSets = (sid: string, seid: string) => request(setsPath(sid, se
 export async function uploadMedia(sid: string, file: { uri: string; name: string; type: string }) {
   const form = new FormData();
   if (Platform.OS === 'web') form.append('file', await (await fetch(file.uri)).blob(), file.name);
-  else form.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob); // RN file descriptor
+  else form.append('file', new File(file.uri)); // expo/fetch (the global fetch) rejects RN's { uri, name, type } parts
   return request<{ id: string }>(`${sessions}/${sid}/media`, { method: 'POST', body: form });
 }
 
