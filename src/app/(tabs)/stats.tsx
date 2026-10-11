@@ -190,10 +190,7 @@ export default function StatsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={{ gap: 2 }}>
-          <Text style={styles.title}>운동 통계</Text>
-          <Text style={styles.subtitle}>부위별, 종목별 볼륨 추이</Text>
-        </View>
+        <Text style={styles.title}>운동 통계</Text>
 
         <View style={styles.periodControls}>
           <View style={styles.periodHint}>
@@ -288,7 +285,6 @@ export default function StatsScreen() {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32, gap: 12 },
   title: { fontFamily: Font.outfit.bold, fontSize: 22, color: '#fff' },
-  subtitle: { fontFamily: Font.manrope.regular, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
   sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
   period: { fontFamily: Font.manrope.semibold, fontSize: 12, color: '#9a9aa6', marginTop: 12 },
   periodControls: { gap: 12, marginTop: 4 },
