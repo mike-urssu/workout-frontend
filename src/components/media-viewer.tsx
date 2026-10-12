@@ -1,4 +1,3 @@
-import { useEvent } from 'expo';
 import { File, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { Asset, requestPermissionsAsync } from 'expo-media-library';
@@ -121,23 +120,14 @@ function DownloadButton({ item }: { item: MediaItem }) {
   );
 }
 
-/** Plays while on screen; a tap toggles play/pause. */
+/** Plays while on screen; play/pause, seeking and sound are the native controls. */
 function Video({ source, active }: { source: { uri: string; headers?: Record<string, string> }; active: boolean }) {
   const player = useVideoPlayer(source, (p) => { p.loop = true; });
-  const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
+  // An effect, not render: re-renders must not undo a pause the user made with the controls.
   useEffect(() => {
     if (active) player.play(); else player.pause();
   }, [active, player]);
-  return (
-    <Pressable style={styles.fill} onPress={() => (isPlaying ? player.pause() : player.play())} accessibilityLabel={isPlaying ? '일시정지' : '재생'}>
-      <VideoView player={player} style={styles.fill} contentFit="cover" nativeControls={false} pointerEvents="none" />
-      {!isPlaying && (
-        <View style={styles.paused} pointerEvents="none">
-          <Image source={require('@/assets/images/media-play.svg')} style={{ width: 56, height: 56 }} />
-        </View>
-      )}
-    </Pressable>
-  );
+  return <VideoView player={player} style={styles.fill} contentFit="cover" nativeControls />;
 }
 
 const styles = StyleSheet.create({
@@ -154,7 +144,6 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.63, shadowRadius: 32, shadowOffset: { width: 0, height: 12 },
   },
   fill: { width: '100%', height: '100%' },
-  paused: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' },
   download: {
     position: 'absolute', top: 10.5, right: 10.5, width: 36, height: 36, borderRadius: 18,
     backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, alignItems: 'center', justifyContent: 'center',
