@@ -1,9 +1,10 @@
+import { useEvent } from 'expo';
 import { File, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { Asset, requestPermissionsAsync } from 'expo-media-library';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { CircleX, Download } from 'lucide-react-native';
-import { useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FlatList, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,55 +18,58 @@ type Props = { media: MediaItem[]; startIndex: number; visible: boolean; onClose
 
 /** Full-screen swipeable viewer for the "오운완 인증" photos/videos. */
 export function MediaViewer({ media, startIndex, visible, onClose }: Props) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pager media={media} startIndex={startIndex} onClose={onClose} />
+    </Modal>
+  );
+}
+
+/** Mounts with each open (Modal drops its children when hidden), so it starts on the tapped item instead of scrolling there from the first. */
+function Pager({ media, startIndex, onClose }: Omit<Props, 'visible'>) {
   const { width } = useWindowDimensions();
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(startIndex);
-  const list = useRef<FlatList<MediaItem>>(null);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => {
-      setIndex(startIndex);
-      list.current?.scrollToIndex({ index: startIndex, animated: false });
-    }}>
-      <View style={[styles.root, { paddingTop: top + 8, paddingBottom: bottom + 8 }]}>
-        <View style={styles.topBar}>
-          <View style={styles.indexPill}>
-            <Text style={styles.indexText}>{`${index + 1} `}<Text style={{ color: Palette.muted }}>{`/ ${media.length}`}</Text></Text>
-          </View>
-          <Text style={styles.title}>오운완 인증</Text>
-          <Pressable style={styles.close} onPress={onClose} hitSlop={8}>
-            <CircleX size={16} color="#fff" />
-          </Pressable>
+    <View style={[styles.root, { paddingTop: top + 8, paddingBottom: bottom + 8 }]}>
+      <View style={styles.topBar}>
+        <View style={styles.indexPill}>
+          <Text style={styles.indexText}>{`${index + 1} `}<Text style={{ color: Palette.muted }}>{`/ ${media.length}`}</Text></Text>
         </View>
-
-        <View style={styles.center}>
-          <FlatList
-            ref={list}
-            data={media}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(m) => m.id}
-            getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
-            onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
-            renderItem={({ item, index: i }) => (
-              <View style={{ width, alignItems: 'center' }}>
-                <View style={styles.frame}>
-                  <Item item={item} active={visible && i === index} />
-                  <DownloadButton item={item} />
-                </View>
-              </View>
-            )}
-          />
-        </View>
-
-        <View style={styles.dots}>
-          {media.map((_, i) => (
-            <View key={i} style={i === index ? styles.dotActive : styles.dot} />
-          ))}
-        </View>
+        <Text style={styles.title}>오운완 인증</Text>
+        <Pressable style={styles.close} onPress={onClose} hitSlop={8}>
+          <CircleX size={16} color="#fff" />
+        </Pressable>
       </View>
-    </Modal>
+
+      <View style={styles.center}>
+        <FlatList
+          data={media}
+          initialScrollIndex={startIndex}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(m) => m.id}
+          getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+          onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
+          renderItem={({ item, index: i }) => (
+            <View style={{ width, alignItems: 'center' }}>
+              <View style={styles.frame}>
+                <Item item={item} active={i === index} />
+                <DownloadButton item={item} />
+              </View>
+            </View>
+          )}
+        />
+      </View>
+
+      <View style={styles.dots}>
+        {media.map((_, i) => (
+          <View key={i} style={i === index ? styles.dotActive : styles.dot} />
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -117,10 +121,23 @@ function DownloadButton({ item }: { item: MediaItem }) {
   );
 }
 
+/** Plays while on screen; a tap toggles play/pause. */
 function Video({ source, active }: { source: { uri: string; headers?: Record<string, string> }; active: boolean }) {
   const player = useVideoPlayer(source, (p) => { p.loop = true; });
-  if (active) player.play(); else player.pause();
-  return <VideoView player={player} style={styles.fill} contentFit="cover" nativeControls />;
+  const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
+  useEffect(() => {
+    if (active) player.play(); else player.pause();
+  }, [active, player]);
+  return (
+    <Pressable style={styles.fill} onPress={() => (isPlaying ? player.pause() : player.play())} accessibilityLabel={isPlaying ? '일시정지' : '재생'}>
+      <VideoView player={player} style={styles.fill} contentFit="cover" nativeControls={false} pointerEvents="none" />
+      {!isPlaying && (
+        <View style={styles.paused} pointerEvents="none">
+          <Image source={require('@/assets/images/media-play.svg')} style={{ width: 56, height: 56 }} />
+        </View>
+      )}
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -137,6 +154,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.63, shadowRadius: 32, shadowOffset: { width: 0, height: 12 },
   },
   fill: { width: '100%', height: '100%' },
+  paused: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' },
   download: {
     position: 'absolute', top: 10.5, right: 10.5, width: 36, height: 36, borderRadius: 18,
     backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, alignItems: 'center', justifyContent: 'center',
