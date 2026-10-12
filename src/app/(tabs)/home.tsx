@@ -193,12 +193,21 @@ type CompleteProps = {
 };
 
 const MAX_MEDIA = 5;
+const MB = 1024 * 1024;
+
+/** BR-005 limits checked before uploading: the server rejects a body over 110MB with a bare VALIDATION_FAILED, and this also skips sending a file that would fail anyway. */
+function checkLimits(a: ImagePicker.ImagePickerAsset) {
+  const isVideo = a.type === 'video';
+  if (a.fileSize && a.fileSize > (isVideo ? 100 : 20) * MB) throw new ApiError(400, 'MEDIA_LIMIT_EXCEEDED', '', { limit: 'FILE_SIZE' });
+  if (isVideo && a.duration && a.duration > 60_000) throw new ApiError(400, 'MEDIA_LIMIT_EXCEEDED', '', { limit: 'DURATION' });
+}
 
 function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteProps) {
   const [picked, setPicked] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [uploaded, setUploaded] = useState<Record<string, string>>({}); // asset uri -> media id, kept for retries
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [failed, setFailed] = useState<string>(); // uri of the asset whose upload failed last
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -212,12 +221,16 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   /** Upload what is not uploaded yet (in picked order), then complete with the ids. Any failure stops before completing (BR-007). */
   const save = async (withMedia: boolean) => {
     setSaving(true);
+    setFailed(undefined);
+    let current: ImagePicker.ImagePickerAsset | undefined; // stays set only if its upload throws
     try {
       const ids: string[] = [];
       const done = { ...uploaded };
       if (withMedia) {
         for (const a of picked) {
           if (!done[a.uri]) {
+            current = a;
+            checkLimits(a);
             const isVideo = a.type === 'video';
             const name = a.fileName ?? `upload.${isVideo ? 'mp4' : 'jpg'}`;
             try {
@@ -225,6 +238,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
             } finally {
               setUploaded({ ...done });
             }
+            current = undefined;
           }
           ids.push(done[a.uri]);
         }
@@ -238,7 +252,8 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
       setUploaded({});
       setSaved(true);
     } catch (e) {
-      notify(mediaMessage(e));
+      setFailed(current?.uri);
+      notify(mediaMessage(e, current && { index: picked.indexOf(current), video: current.type === 'video' }));
       if (e instanceof ApiError && ['WORKOUT_SESSION_NOT_EDITABLE', 'WORKOUT_SESSION_ALREADY_COMPLETED', 'WORKOUT_SESSION_NOT_FOUND', 'WORKOUT_SESSION_HAS_NO_SETS'].includes(e.code)) onDone();
     } finally {
       setSaving(false);
@@ -276,7 +291,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
           </Pressable>
           <View style={styles.thumbs}>
             {Array.from({ length: MAX_MEDIA }, (_, i) => picked[i]).map((a, i) => a
-              ? <PickedThumb key={a.uri} asset={a} disabled={saving} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
+              ? <PickedThumb key={a.uri} asset={a} failed={a.uri === failed} disabled={saving} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
               : <View key={`empty-${i}`} style={[styles.thumb, styles.thumbEmpty]} />)}
           </View>
         </View>
@@ -311,9 +326,9 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   );
 }
 
-function PickedThumb({ asset, disabled, onRemove }: { asset: ImagePicker.ImagePickerAsset; disabled: boolean; onRemove: () => void }) {
+function PickedThumb({ asset, failed, disabled, onRemove }: { asset: ImagePicker.ImagePickerAsset; failed: boolean; disabled: boolean; onRemove: () => void }) {
   return (
-    <View style={styles.thumb}>
+    <View style={[styles.thumb, failed && styles.thumbFailed]}>
       {asset.type === 'video' ? <VideoThumb uri={asset.uri} /> : <Image source={asset.uri} style={StyleSheet.absoluteFill} contentFit="cover" />}
       {asset.type === 'video' && (
         <View style={styles.videoDim} pointerEvents="none">
@@ -333,18 +348,26 @@ function VideoThumb({ uri }: { uri: string }) {
   return <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} pointerEvents="none" />;
 }
 
-/** Upload / complete failures (workout-media design 4.2). */
-function mediaMessage(e: unknown) {
+/** Upload / complete failures (workout-media design 4.2). `file` names the attachment whose upload failed. */
+function mediaMessage(e: unknown, file?: { index: number; video: boolean }) {
+  const kind = file ? (file.video ? '동영상' : '사진') : '';
+  const which = file ? `${file.index + 1}번째 ${kind}` : '';
   if (e instanceof ApiError) {
-    if (e.code === 'MEDIA_UNSUPPORTED_TYPE') return '지원하지 않는 파일이에요. 사진은 JPEG·PNG·HEIC, 동영상은 MP4·MOV만 가능해요.';
+    if (e.code === 'MEDIA_UNSUPPORTED_TYPE') {
+      return file ? `${which}은 지원하지 않는 형식이에요. ${file.video ? 'MP4·MOV' : 'JPEG·PNG·HEIC'} 파일만 올릴 수 있어요.`
+        : '지원하지 않는 파일이에요. 사진은 JPEG·PNG·HEIC, 동영상은 MP4·MOV만 가능해요.';
+    }
     if (e.code === 'MEDIA_LIMIT_EXCEEDED') {
       const limit = e.details?.limit;
-      return limit === 'COUNT' ? `사진·동영상은 ${MAX_MEDIA}개까지 올릴 수 있어요.`
-        : limit === 'DURATION' ? '동영상은 1분까지 올릴 수 있어요.'
+      if (limit === 'COUNT') return `사진·동영상은 ${MAX_MEDIA}개까지 올릴 수 있어요.`;
+      if (limit === 'DURATION') return `${which || '동영상'}이 너무 길어요. 동영상은 1분까지 올릴 수 있어요.`;
+      return file ? `${which}이 너무 커요. ${kind}은 ${file.video ? '100MB' : '20MB'}까지 올릴 수 있어요.`
         : '사진은 20MB, 동영상은 100MB까지 올릴 수 있어요.';
     }
-    if (e.status === 503) return '서버에 저장하지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.';
-    if (e.status === 0) return '네트워크 문제로 올리지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.';
+    // Upload answers this when the file part is empty or missing, i.e. the app could not read the file.
+    if (e.code === 'VALIDATION_FAILED' && file) return `${which}을 읽지 못했어요. 기기에 저장된 파일인지 확인하거나 다른 파일을 골라 주세요.`;
+    if (e.status === 503) return `${which ? `${which}을 ` : ''}서버에 저장하지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.`;
+    if (e.status === 0) return `네트워크 문제로 ${which ? `${which}을 ` : ''}올리지 못했어요. 다시 시도하거나 건너뛰기를 눌러 주세요.`;
     if (e.code === 'WORKOUT_SESSION_HAS_NO_SETS') return '세트를 하나 이상 기록해야 운동을 완료할 수 있어요.';
   }
   return errorMessage(e);
@@ -422,6 +445,7 @@ const styles = StyleSheet.create({
   uploadText: { fontFamily: Font.manrope.semibold, fontSize: 14, color: Palette.accent },
   thumbs: { flexDirection: 'row', gap: 5 },
   thumb: { flex: 1, aspectRatio: 1, borderRadius: 12, overflow: 'hidden' },
+  thumbFailed: { borderWidth: 2, borderColor: Palette.danger },
   thumbEmpty: { backgroundColor: Palette.inset, borderWidth: 1, borderColor: Palette.border },
   videoDim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
   thumbRemove: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: Palette.border, alignItems: 'center', justifyContent: 'center' },
