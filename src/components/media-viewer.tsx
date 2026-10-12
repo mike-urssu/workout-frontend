@@ -32,11 +32,13 @@ function Pager({ media, startIndex, onClose }: Omit<Props, 'visible'>) {
 
   return (
     <View style={[styles.root, { paddingTop: top + 8, paddingBottom: bottom + 8 }]}>
-      <View style={styles.topBar}>
-        <View style={styles.indexPill}>
+      {/* Tapping the empty space above or below the item closes, like the × button. */}
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessible={false} />
+      <View style={styles.topBar} pointerEvents="box-none">
+        <View style={styles.indexPill} pointerEvents="none">
           <Text style={styles.indexText}>{`${index + 1} `}<Text style={{ color: Palette.muted }}>{`/ ${media.length}`}</Text></Text>
         </View>
-        <Text style={styles.title}>오운완 인증</Text>
+        <Text style={styles.title} pointerEvents="none">오운완 인증</Text>
         <Pressable style={styles.close} onPress={onClose} hitSlop={8}>
           <CircleX size={16} color="#fff" />
         </Pressable>
@@ -63,7 +65,7 @@ function Pager({ media, startIndex, onClose }: Omit<Props, 'visible'>) {
         />
       </View>
 
-      <View style={styles.dots}>
+      <View style={styles.dots} pointerEvents="none">
         {media.map((_, i) => (
           <View key={i} style={i === index ? styles.dotActive : styles.dot} />
         ))}
