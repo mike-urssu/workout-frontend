@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import { Camera, ChevronLeft, ChevronRight, Play } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
@@ -26,13 +26,18 @@ export default function HistoryScreen() {
   const [day, setDay] = useState<Day | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);
 
+  const latest = useRef<string | null>(null); // ignores responses for a date tapped before the current one
+
+  /** Keeps the previous day on screen until the new one arrives, so the content does not shrink and reset the scroll. */
   const loadDay = useCallback(async (date: string | null) => {
+    latest.current = date;
     setSelected(date);
-    setDay(null);
-    if (!date) return;
+    if (!date) return setDay(null);
     try {
-      setDay(await getDay(date));
+      const d = await getDay(date);
+      if (latest.current === date) setDay(d);
     } catch (e) {
+      if (latest.current === date) setDay(null);
       notify(errorMessage(e));
     }
   }, []);
