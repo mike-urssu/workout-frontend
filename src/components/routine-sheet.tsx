@@ -1,8 +1,8 @@
 import { Menu } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Session, toMs } from '@/api/workout';
-import { Sheet } from '@/components/sheet';
+import { Sheet, SheetScrollView } from '@/components/sheet';
 import { Font, Palette } from '@/constants/theme';
 import { clock, kg } from '@/data/workout';
 
@@ -27,7 +27,7 @@ export function RoutineSheet({ session, currentId, visible, onClose }: { session
         {`총 ${session?.summary.exerciseCount ?? 0}개 종목 · ${kg(session?.summary.totalVolume ?? 0)}kg · ${session?.summary.totalSets ?? 0}세트`}
       </Text>
       {items.length === 0 && <Text style={styles.rtEmpty}>아직 기록한 운동이 없어요</Text>}
-      <ScrollView>
+      <SheetScrollView>
         {items.map((e, i) => {
           const current = e.sessionExerciseId === currentId;
           return (
@@ -50,7 +50,7 @@ export function RoutineSheet({ session, currentId, visible, onClose }: { session
             </View>
           );
         })}
-      </ScrollView>
+      </SheetScrollView>
     </Sheet>
   );
 }

@@ -14,7 +14,7 @@ import {
 } from '@/api/workout';
 import { GroupBreakdown } from '@/components/group-breakdown';
 import { Screen } from '@/components/screen';
-import { Sheet } from '@/components/sheet';
+import { Sheet, SheetScrollView } from '@/components/sheet';
 import { Font, Palette } from '@/constants/theme';
 import { elapsed, kg, koreanDate, minSec } from '@/data/workout';
 import { useActiveSession } from '@/hooks/use-active-session';
@@ -262,7 +262,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
 
   return (
     <Sheet visible={visible} onClose={onClose} maxHeight="94%">
-      <ScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator={false}>
         <Text style={styles.sheetTitle}>오늘의 운동 완료! 💪</Text>
         <View style={styles.sheetMeta}>
           <Text style={styles.sheetDate}>{`${session.performedDate.slice(0, 4)}년 ${koreanDate(new Date(`${session.performedDate}T00:00:00`)).replace(/요일$/, '')}`}</Text>
@@ -295,7 +295,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
               : <View key={`empty-${i}`} style={[styles.thumb, styles.thumbEmpty]} />)}
           </View>
         </View>
-      </ScrollView>
+      </SheetScrollView>
 
       <View style={styles.actions}>
         <Pressable style={[styles.actionBtn, styles.ctaFilled, saving && { opacity: 0.5 }]} onPress={() => save(true)} disabled={saving}>
