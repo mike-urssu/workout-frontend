@@ -9,11 +9,12 @@ type Source = { uri: string; headers?: Record<string, string> };
 /**
  * Source for a protected file (needs the Bearer token). Native image/video components send the headers;
  * on web <img>/<video> cannot, so the file is fetched and shown through an object URL.
+ * A local file (picked but not uploaded yet, so not a server path) is used as is.
  */
 export function useFileSource(path: string | undefined): Source | null {
   const [source, setSource] = useState<Source | null>(null);
   useEffect(() => {
-    if (!path) return;
+    if (!path?.startsWith('/')) return;
     let revoke: string | undefined;
     let cancelled = false;
     (async () => {
@@ -31,5 +32,5 @@ export function useFileSource(path: string | undefined): Source | null {
       if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [path]);
-  return source;
+  return path && !path.startsWith('/') ? { uri: path } : source;
 }

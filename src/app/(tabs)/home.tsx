@@ -10,9 +10,10 @@ import Animated from 'react-native-reanimated';
 import { ApiError } from '@/api/client';
 import { logout } from '@/api/auth';
 import {
-  Session, cancelSession, completeSession, removeExercise, sessionBreakdown, startSession, toMs, uploadMedia,
+  MediaItem, Session, cancelSession, completeSession, removeExercise, sessionBreakdown, startSession, toMs, uploadMedia,
 } from '@/api/workout';
 import { GroupBreakdown } from '@/components/group-breakdown';
+import { MediaViewer } from '@/components/media-viewer';
 import { Screen } from '@/components/screen';
 import { Sheet, SheetScrollView } from '@/components/sheet';
 import { Font, Palette } from '@/constants/theme';
@@ -208,6 +209,10 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failed, setFailed] = useState<string>(); // uri of the asset whose upload failed last
+  const [viewer, setViewer] = useState<number | null>(null);
+  const previews: MediaItem[] = picked.map((a) => ({
+    id: a.uri, mediaType: a.type === 'video' ? 'VIDEO' : 'PHOTO', contentType: a.mimeType ?? '', previewUrl: a.uri, originalUrl: a.uri,
+  }));
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -291,7 +296,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
           </Pressable>
           <View style={styles.thumbs}>
             {Array.from({ length: MAX_MEDIA }, (_, i) => picked[i]).map((a, i) => a
-              ? <PickedThumb key={a.uri} asset={a} failed={a.uri === failed} disabled={saving} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
+              ? <PickedThumb key={a.uri} asset={a} failed={a.uri === failed} disabled={saving} onPress={() => setViewer(i)} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
               : <View key={`empty-${i}`} style={[styles.thumb, styles.thumbEmpty]} />)}
           </View>
         </View>
@@ -305,6 +310,8 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
           <Text style={[styles.ctaText, { color: Palette.accent }]}>건너뛰기</Text>
         </Pressable>
       </View>
+
+      <MediaViewer media={previews} startIndex={viewer ?? 0} visible={viewer !== null} onClose={() => setViewer(null)} downloadable={false} />
 
       <Modal visible={saved} transparent animationType="fade" onRequestClose={() => { setSaved(false); onDone(); }}>
         <View style={styles.savedRoot}>
@@ -326,9 +333,9 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   );
 }
 
-function PickedThumb({ asset, failed, disabled, onRemove }: { asset: ImagePicker.ImagePickerAsset; failed: boolean; disabled: boolean; onRemove: () => void }) {
+function PickedThumb({ asset, failed, disabled, onPress, onRemove }: { asset: ImagePicker.ImagePickerAsset; failed: boolean; disabled: boolean; onPress: () => void; onRemove: () => void }) {
   return (
-    <View style={[styles.thumb, failed && styles.thumbFailed]}>
+    <Pressable style={[styles.thumb, failed && styles.thumbFailed]} onPress={onPress} accessibilityLabel="첨부 미리보기">
       {asset.type === 'video' ? <VideoThumb uri={asset.uri} /> : <Image source={asset.uri} style={StyleSheet.absoluteFill} contentFit="cover" />}
       {asset.type === 'video' && (
         <View style={styles.videoDim} pointerEvents="none">
@@ -338,7 +345,7 @@ function PickedThumb({ asset, failed, disabled, onRemove }: { asset: ImagePicker
       <Pressable style={styles.thumbRemove} onPress={onRemove} disabled={disabled} hitSlop={8} accessibilityLabel="첨부 삭제">
         <Text style={styles.thumbRemoveText}>×</Text>
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 

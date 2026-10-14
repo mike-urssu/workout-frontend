@@ -13,19 +13,19 @@ import { MediaItem, fileUrl } from '@/api/workout';
 import { useFileSource } from '@/hooks/use-file-source';
 import { notify } from '@/lib/dialog';
 
-type Props = { media: MediaItem[]; startIndex: number; visible: boolean; onClose: () => void };
+type Props = { media: MediaItem[]; startIndex: number; visible: boolean; onClose: () => void; downloadable?: boolean };
 
 /** Full-screen swipeable viewer for the "오운완 인증" photos/videos. */
-export function MediaViewer({ media, startIndex, visible, onClose }: Props) {
+export function MediaViewer({ visible, ...props }: Props) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pager media={media} startIndex={startIndex} onClose={onClose} />
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={props.onClose}>
+      <Pager {...props} />
     </Modal>
   );
 }
 
 /** Mounts with each open (Modal drops its children when hidden), so it starts on the tapped item instead of scrolling there from the first. */
-function Pager({ media, startIndex, onClose }: Omit<Props, 'visible'>) {
+function Pager({ media, startIndex, onClose, downloadable = true }: Omit<Props, 'visible'>) {
   const { width } = useWindowDimensions();
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(startIndex);
@@ -58,7 +58,7 @@ function Pager({ media, startIndex, onClose }: Omit<Props, 'visible'>) {
             <View style={{ width, alignItems: 'center' }}>
               <View style={styles.frame}>
                 <Item item={item} active={i === index} />
-                <DownloadButton item={item} />
+                {downloadable && <DownloadButton item={item} />}
               </View>
             </View>
           )}
