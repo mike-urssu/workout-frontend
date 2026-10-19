@@ -207,12 +207,14 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   const [picked, setPicked] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [uploaded, setUploaded] = useState<Record<string, string>>({}); // asset uri -> media id, kept for retries
   const [saving, setSaving] = useState(false);
+  const [savingMedia, setSavingMedia] = useState(false); // the running save sends the attachments (not 건너뛰기)
   const [saved, setSaved] = useState(false);
   const [failed, setFailed] = useState<string>(); // uri of the asset whose upload failed last
   const [viewer, setViewer] = useState<number | null>(null);
   const previews: MediaItem[] = picked.map((a) => ({
     id: a.uri, mediaType: a.type === 'video' ? 'VIDEO' : 'PHOTO', contentType: a.mimeType ?? '', previewUrl: a.uri, originalUrl: a.uri,
   }));
+  const sent = picked.filter((a) => uploaded[a.uri]).length;
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -226,6 +228,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   /** Upload what is not uploaded yet (in picked order), then complete with the ids. Any failure stops before completing (BR-007). */
   const save = async (withMedia: boolean) => {
     setSaving(true);
+    setSavingMedia(withMedia);
     setFailed(undefined);
     let current: ImagePicker.ImagePickerAsset | undefined; // stays set only if its upload throws
     try {
@@ -304,7 +307,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
 
       <View style={styles.actions}>
         <Pressable style={[styles.actionBtn, styles.ctaFilled, saving && { opacity: 0.5 }]} onPress={() => save(true)} disabled={saving}>
-          <Text style={[styles.ctaText, { color: Palette.bg }]}>{saving ? '저장 중…' : '저장하기'}</Text>
+          <Text style={[styles.ctaText, { color: Palette.bg }]}>{saving ? (savingMedia && sent < picked.length ? `전송 중 ${sent}/${picked.length}` : '저장 중…') : '저장하기'}</Text>
         </Pressable>
         <Pressable style={[styles.actionBtn, styles.ctaOutline, saving && { opacity: 0.5 }]} onPress={() => save(false)} disabled={saving}>
           <Text style={[styles.ctaText, { color: Palette.accent }]}>건너뛰기</Text>
