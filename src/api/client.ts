@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 // Dev: set EXPO_PUBLIC_API_URL (e.g. http://<LAN-IP>:8080) in .env
 export const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://workout-api.jjoon.cloud';
 const TOKEN_KEY = 'auth.token';
+const REQUEST_TIMEOUT_MS = 10_000;
 
 /** Login token lives in the device's secure storage (NFR-SEC-003). Web has no secure store: localStorage (dev only). */
 export const tokenStore =
@@ -45,6 +46,10 @@ const SESSION_CODES = ['AUTH_SESSION_EXPIRED', 'AUTH_SESSION_REPLACED', 'AUTH_SE
 export async function request<T = void>(path: string, init: Init = {}): Promise<T> {
   const token = await tokenStore.get();
   const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  // An unreachable server otherwise hangs for ~60s+ (e.g. the startup session check leaves a blank screen).
+  // Uploads are exempt: a video can legitimately take longer.
+  const controller = new AbortController();
+  const timer = isForm ? undefined : setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
@@ -55,9 +60,12 @@ export async function request<T = void>(path: string, init: Init = {}): Promise<
         ...init.headers,
       },
       body: init.body ? (isForm ? (init.body as FormData) : JSON.stringify(init.body)) : undefined,
+      signal: controller.signal,
     });
   } catch {
     throw new ApiError(0, 'NETWORK_ERROR', '네트워크 연결을 확인해 주세요.');
+  } finally {
+    clearTimeout(timer);
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
