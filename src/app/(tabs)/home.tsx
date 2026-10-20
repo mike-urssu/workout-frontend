@@ -211,6 +211,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   const [savingMedia, setSavingMedia] = useState(false); // the running save sends the attachments (not 건너뛰기)
   const [saved, setSaved] = useState(false);
   const [failed, setFailed] = useState<string>(); // uri of the asset whose upload failed last
+  const [progress, setProgress] = useState<Record<string, number>>({}); // asset uri -> percent, while it uploads
   const [viewer, setViewer] = useState<number | null>(null);
   const previews: MediaItem[] = picked.map((a) => ({
     id: a.uri, mediaType: a.type === 'video' ? 'VIDEO' : 'PHOTO', contentType: a.mimeType ?? '', previewUrl: a.uri, displayUrl: a.uri, originalUrl: a.uri,
@@ -244,10 +245,14 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
               checkLimits(a);
               const isVideo = a.type === 'video';
               const name = a.fileName ?? `upload.${isVideo ? 'mp4' : 'jpg'}`;
-              done[a.uri] = (await uploadMedia(session.id, { uri: a.uri, name, type: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg') })).id;
+              const uri = a.uri;
+              done[uri] = (await uploadMedia(session.id, { uri, name, type: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg') },
+                (r) => setProgress((p) => ({ ...p, [uri]: Math.round(r * 100) })))).id;
               setUploaded({ ...done });
             } catch (e) {
               if (!failure.asset) Object.assign(failure, { asset: a, error: e });
+            } finally {
+              setProgress(({ [a.uri]: _, ...rest }) => rest);
             }
           }
         };
@@ -304,7 +309,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
           </Pressable>
           <View style={styles.thumbs}>
             {Array.from({ length: MAX_MEDIA }, (_, i) => picked[i]).map((a, i) => a
-              ? <PickedThumb key={a.uri} asset={a} failed={a.uri === failed} disabled={saving} onPress={() => setViewer(i)} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
+              ? <PickedThumb key={a.uri} asset={a} failed={a.uri === failed} percent={progress[a.uri]} disabled={saving} onPress={() => setViewer(i)} onRemove={() => setPicked((m) => m.filter((x) => x.uri !== a.uri))} />
               : <View key={`empty-${i}`} style={[styles.thumb, styles.thumbEmpty]} />)}
           </View>
         </View>
@@ -341,13 +346,18 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   );
 }
 
-function PickedThumb({ asset, failed, disabled, onPress, onRemove }: { asset: ImagePicker.ImagePickerAsset; failed: boolean; disabled: boolean; onPress: () => void; onRemove: () => void }) {
+function PickedThumb({ asset, failed, percent, disabled, onPress, onRemove }: { asset: ImagePicker.ImagePickerAsset; failed: boolean; percent?: number; disabled: boolean; onPress: () => void; onRemove: () => void }) {
   return (
     <Pressable style={[styles.thumb, failed && styles.thumbFailed]} onPress={onPress} accessibilityLabel="첨부 미리보기">
       {asset.type === 'video' ? <VideoThumb uri={asset.uri} /> : <Image source={asset.uri} style={StyleSheet.absoluteFill} contentFit="cover" />}
       {asset.type === 'video' && (
         <View style={styles.videoDim} pointerEvents="none">
           <Image source={require('@/assets/images/media-play.svg')} style={{ width: 28, height: 28 }} />
+        </View>
+      )}
+      {percent !== undefined && (
+        <View style={styles.videoDim} pointerEvents="none">
+          <Text style={styles.thumbPercent}>{`${percent}%`}</Text>
         </View>
       )}
       <Pressable style={styles.thumbRemove} onPress={onRemove} disabled={disabled} hitSlop={8} accessibilityLabel="첨부 삭제">
@@ -464,6 +474,7 @@ const styles = StyleSheet.create({
   thumbEmpty: { backgroundColor: Palette.inset, borderWidth: 1, borderColor: Palette.border },
   videoDim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
   thumbRemove: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: Palette.border, alignItems: 'center', justifyContent: 'center' },
+  thumbPercent: { fontFamily: Font.manrope.bold, fontSize: 14, color: '#fff' },
   thumbRemoveText: { fontFamily: Font.manrope.bold, fontSize: 12, color: Palette.muted },
   savedRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', paddingHorizontal: 24 },
   savedCard: {

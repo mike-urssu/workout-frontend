@@ -63,15 +63,21 @@ export async function request<T = void>(path: string, init: Init = {}): Promise<
       signal: controller.signal,
     });
   } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', '네트워크 연결을 확인해 주세요.');
+    throw networkError();
   } finally {
     clearTimeout(timer);
   }
-  const text = await res.text();
+  return handleResponse<T>(path, token, res.status, await res.text());
+}
+
+export const networkError = () => new ApiError(0, 'NETWORK_ERROR', '네트워크 연결을 확인해 주세요.');
+
+/** Body of a finished response, or an ApiError. Shared by `request` and native uploads (which don't go through fetch). */
+export async function handleResponse<T>(path: string, token: string | null, status: number, text: string): Promise<T> {
   const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) {
-    const err = new ApiError(res.status, data?.code ?? 'UNKNOWN', data?.message ?? '요청에 실패했습니다.', data?.details, data?.errors);
-    if (res.status === 401 && token && SESSION_CODES.includes(err.code) && !path.startsWith('/api/v1/auth/')) {
+  if (status < 200 || status >= 300) {
+    const err = new ApiError(status, data?.code ?? 'UNKNOWN', data?.message ?? '요청에 실패했습니다.', data?.details, data?.errors);
+    if (status === 401 && token && SESSION_CODES.includes(err.code) && !path.startsWith('/api/v1/auth/')) {
       await tokenStore.clear();
       router.replace({ pathname: '/', params: { reason: err.code } });
     }

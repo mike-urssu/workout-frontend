@@ -1,7 +1,7 @@
-import { File } from 'expo-file-system';
+import { File, UploadType } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-import { ApiError, BASE_URL, request } from './client';
+import { ApiError, BASE_URL, handleResponse, networkError, request, tokenStore } from './client';
 
 // Shapes follow the backend design docs (workout-record v0.7, workout-media v0.2).
 export type CategoryRef = { id: string; name: string };
@@ -67,12 +67,29 @@ export const deleteSet = (sid: string, seid: string, setId: string) =>
   request(`${setsPath(sid, seid)}/${setId}`, { method: 'DELETE' });
 export const clearSets = (sid: string, seid: string) => request(setsPath(sid, seid), { method: 'DELETE' });
 
-/** Uploads one photo/video (temporary until the session is completed). */
-export async function uploadMedia(sid: string, file: { uri: string; name: string; type: string }) {
-  const form = new FormData();
-  if (Platform.OS === 'web') form.append('file', await (await fetch(file.uri)).blob(), file.name);
-  else form.append('file', new File(file.uri)); // expo/fetch (the global fetch) rejects RN's { uri, name, type } parts
-  return request<{ id: string }>(`${sessions}/${sid}/media`, { method: 'POST', body: form });
+/** Uploads one photo/video (temporary until the session is completed). `onProgress` gets 0–1, native only (fetch can't report upload progress). */
+export async function uploadMedia(sid: string, file: { uri: string; name: string; type: string }, onProgress?: (ratio: number) => void) {
+  const path = `${sessions}/${sid}/media`;
+  if (Platform.OS === 'web') {
+    const form = new FormData();
+    form.append('file', await (await fetch(file.uri)).blob(), file.name);
+    return request<{ id: string }>(path, { method: 'POST', body: form });
+  }
+  const token = await tokenStore.get();
+  const local = new File(file.uri);
+  let res;
+  try {
+    res = await local.upload(`${BASE_URL}${path}`, {
+      uploadType: UploadType.MULTIPART,
+      mimeType: file.type,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      onProgress: ({ bytesSent, totalBytes }) => totalBytes && onProgress?.(bytesSent / totalBytes),
+    });
+  } catch {
+    // Same code the server gives an empty file part, so the "could not read the file" message still shows.
+    throw local.exists ? networkError() : new ApiError(400, 'VALIDATION_FAILED', '');
+  }
+  return handleResponse<{ id: string }>(path, token, res.status, res.body);
 }
 
 export const getMonth = (month?: string) => request<Month>(`/api/v1/workout-days${month ? `?month=${month}` : ''}`);
