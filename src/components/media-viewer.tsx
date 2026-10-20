@@ -74,11 +74,12 @@ function Pager({ media, startIndex, onClose, downloadable = true }: Omit<Props, 
   );
 }
 
+/** Shows the server's smaller display copy; the original is only for saving to the album. */
 function Item({ item, active }: { item: MediaItem; active: boolean }) {
-  const original = useFileSource(item.originalUrl);
+  const display = useFileSource(item.displayUrl);
   const preview = useFileSource(item.previewUrl);
-  if (item.mediaType === 'VIDEO') return original ? <Video source={original} active={active} /> : null;
-  return <Image source={original ?? preview} placeholder={preview ?? undefined} style={styles.fill} contentFit="cover" />;
+  if (item.mediaType === 'VIDEO') return display ? <Video source={display} active={active} /> : null;
+  return <Image source={display ?? preview} placeholder={preview ?? undefined} style={styles.fill} contentFit="cover" />;
 }
 
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'video/mp4': 'mp4', 'video/quicktime': 'mov' };

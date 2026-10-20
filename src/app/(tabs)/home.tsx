@@ -195,6 +195,7 @@ type CompleteProps = {
 
 const MAX_MEDIA = 5;
 const MB = 1024 * 1024;
+const UPLOAD_CONCURRENCY = 3;
 
 /** BR-005 limits checked before uploading: the server rejects a body over 110MB with a bare VALIDATION_FAILED, and this also skips sending a file that would fail anyway. */
 function checkLimits(a: ImagePicker.ImagePickerAsset) {
@@ -212,7 +213,7 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   const [failed, setFailed] = useState<string>(); // uri of the asset whose upload failed last
   const [viewer, setViewer] = useState<number | null>(null);
   const previews: MediaItem[] = picked.map((a) => ({
-    id: a.uri, mediaType: a.type === 'video' ? 'VIDEO' : 'PHOTO', contentType: a.mimeType ?? '', previewUrl: a.uri, originalUrl: a.uri,
+    id: a.uri, mediaType: a.type === 'video' ? 'VIDEO' : 'PHOTO', contentType: a.mimeType ?? '', previewUrl: a.uri, displayUrl: a.uri, originalUrl: a.uri,
   }));
   const sent = picked.filter((a) => uploaded[a.uri]).length;
 
@@ -225,32 +226,35 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
     if (!res.canceled) setPicked((m) => [...m, ...res.assets].slice(0, MAX_MEDIA));
   };
 
-  /** Upload what is not uploaded yet (in picked order), then complete with the ids. Any failure stops before completing (BR-007). */
+  /** Upload what is not uploaded yet, then complete with the ids in picked order. Any failure stops before completing (BR-007). */
   const save = async (withMedia: boolean) => {
     setSaving(true);
     setSavingMedia(withMedia);
     setFailed(undefined);
-    let current: ImagePicker.ImagePickerAsset | undefined; // stays set only if its upload throws
+    const failure: { asset?: ImagePicker.ImagePickerAsset; error?: unknown } = {}; // the first upload that threw
     try {
-      const ids: string[] = [];
       const done = { ...uploaded };
       if (withMedia) {
-        for (const a of picked) {
-          if (!done[a.uri]) {
-            current = a;
-            checkLimits(a);
-            const isVideo = a.type === 'video';
-            const name = a.fileName ?? `upload.${isVideo ? 'mp4' : 'jpg'}`;
+        const todo = picked.filter((a) => !done[a.uri]);
+        // A few at a time, so one file's processing on the server overlaps the next one's transfer.
+        // After a failure the workers stop taking new files but let the running ones finish: a retry must not resend them.
+        const send = async () => {
+          for (let a = todo.shift(); a && !failure.asset; a = todo.shift()) {
             try {
+              checkLimits(a);
+              const isVideo = a.type === 'video';
+              const name = a.fileName ?? `upload.${isVideo ? 'mp4' : 'jpg'}`;
               done[a.uri] = (await uploadMedia(session.id, { uri: a.uri, name, type: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg') })).id;
-            } finally {
               setUploaded({ ...done });
+            } catch (e) {
+              if (!failure.asset) Object.assign(failure, { asset: a, error: e });
             }
-            current = undefined;
           }
-          ids.push(done[a.uri]);
-        }
+        };
+        await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, send));
+        if (failure.asset) throw failure.error;
       }
+      const ids = withMedia ? picked.map((a) => done[a.uri]) : [];
       // Exercises that were only opened (no sets) would otherwise count as "performed" once the session completes.
       await Promise.all(
         session.exercises.filter((e) => e.setCount === 0).map((e) => removeExercise(session.id, e.sessionExerciseId).catch(() => {})),
@@ -260,8 +264,9 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
       setUploaded({});
       setSaved(true);
     } catch (e) {
-      setFailed(current?.uri);
-      notify(mediaMessage(e, current && { index: picked.indexOf(current), video: current.type === 'video' }));
+      const a = failure.asset;
+      setFailed(a?.uri);
+      notify(mediaMessage(e, a && { index: picked.indexOf(a), video: a.type === 'video' }));
       if (e instanceof ApiError && ['WORKOUT_SESSION_NOT_EDITABLE', 'WORKOUT_SESSION_ALREADY_COMPLETED', 'WORKOUT_SESSION_NOT_FOUND', 'WORKOUT_SESSION_HAS_NO_SETS'].includes(e.code)) onDone();
     } finally {
       setSaving(false);

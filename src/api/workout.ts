@@ -20,7 +20,7 @@ export type Session = {
   summary: { durationSeconds: number | null; exerciseCount: number; totalSets: number; totalRepetitions: number; totalVolume: number };
 };
 export type LastRecord = { performedDate: string; sets: { setNumber: number; weight: number; repetitions: number }[] };
-export type MediaItem = { id: string; mediaType: 'PHOTO' | 'VIDEO'; contentType: string; previewUrl: string; originalUrl: string };
+export type MediaItem = { id: string; mediaType: 'PHOTO' | 'VIDEO'; contentType: string; previewUrl: string; displayUrl: string; originalUrl: string };
 export type MonthDay = { date: string; categories: CategoryRef[] };
 export type Month = { month: string | null; latestDate: string | null; days: MonthDay[] };
 export type Day = {
