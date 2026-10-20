@@ -74,9 +74,9 @@ function Pager({ media, startIndex, onClose, downloadable = true }: Omit<Props, 
   );
 }
 
-/** Shows the server's smaller display copy; the original is only for saving to the album. */
+/** Shows the server's smaller display copy; the original is only for saving to the album (and for servers without display copies). */
 function Item({ item, active }: { item: MediaItem; active: boolean }) {
-  const display = useFileSource(item.displayUrl);
+  const display = useFileSource(item.displayUrl ?? item.originalUrl);
   const preview = useFileSource(item.previewUrl);
   if (item.mediaType === 'VIDEO') return display ? <Video source={display} active={active} /> : null;
   return <Image source={display ?? preview} placeholder={preview ?? undefined} style={styles.fill} contentFit="cover" />;
