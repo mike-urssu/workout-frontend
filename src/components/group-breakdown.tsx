@@ -33,7 +33,7 @@ function GroupCard({ group, bg }: { group: Breakdown[number]; bg: string }) {
       {group.exercises.map((e) => (
         <View key={e.key} style={[styles.exercise, open && styles.divided]}>
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseName}>{e.name}</Text>
+            <Text style={styles.exerciseName} numberOfLines={1}>{e.name}</Text>
             <Text style={styles.summary}>{`${kg(e.volume)}kg · ${e.setCount}세트`}</Text>
           </View>
           {open &&
@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
   summary: { fontFamily: Font.manrope.regular, fontSize: 13, color: 'rgba(255,255,255,0.8)' },
   exercise: { gap: 6 },
   divided: { borderTopWidth: 1, borderTopColor: Palette.border, paddingTop: 10 },
-  exerciseRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  exerciseName: { fontFamily: Font.outfit.semibold, fontSize: 15, color: '#fff' },
+  exerciseRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  exerciseName: { flexShrink: 1, fontFamily: Font.outfit.semibold, fontSize: 15, color: '#fff' },
   setLine: { fontFamily: Font.manrope.regular, fontSize: 12, color: 'rgba(255,255,255,0.5)' },
 });
