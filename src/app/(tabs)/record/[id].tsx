@@ -14,6 +14,7 @@ import { RoutineButton, RoutineSheet } from '@/components/routine-sheet';
 import { SwipeBack } from '@/components/swipe-back';
 import { Font, Palette } from '@/constants/theme';
 import { clockSec, elapsed } from '@/data/workout';
+import { refreshActiveSession } from '@/hooks/use-active-session';
 import { useElapsed } from '@/hooks/use-elapsed';
 import { errorMessage, notify } from '@/lib/dialog';
 
@@ -93,6 +94,7 @@ export default function RecordScreen() {
         : await addSet(sessionId, sessionExerciseId, row.weight, row.reps);
       // ponytail: edits made while this request is in flight are not saved; blur again to save them
       patch(key, { id: saved.id, time: clockSec(toMs(saved.createdAt)), saving: false, saved: { weight: saved.weight, reps: saved.repetitions } });
+      refreshActiveSession().catch(() => {}); // the home tab's card shows the new totals as soon as it is back in view
     } catch (e) {
       patch(key, { saving: false, invalid: e instanceof ApiError && e.code === 'VALIDATION_FAILED' });
       fail(e);
@@ -101,7 +103,10 @@ export default function RecordScreen() {
 
   const remove = async (row: Row) => {
     try {
-      if (row.id) await deleteSet(sessionId, sessionExerciseId, row.id);
+      if (row.id) {
+        await deleteSet(sessionId, sessionExerciseId, row.id);
+        refreshActiveSession().catch(() => {});
+      }
       setRows((all) => (all.length > 1 ? all.filter((r) => r.key !== row.key) : [draft()]));
     } catch (e) {
       fail(e);
