@@ -66,12 +66,12 @@ export function PrevRecords({ exerciseId, exerciseName, first, onClose, onEmpty 
 
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.nav}>
-          <Arrow label="‹" enabled={older && !loading} onPress={() => go(data.page + 1)} a11y="더 이전 기록" />
+          <Arrow label="‹" show={older} loading={loading} onPress={() => go(data.page + 1)} a11y="더 이전 기록" />
           <View style={styles.navCenter}>
             <Text style={styles.date}>{record.performedDate.replaceAll('-', '.')}</Text>
             <Text style={styles.position}>{position + edge}</Text>
           </View>
-          <Arrow label="›" enabled={newer && !loading} onPress={() => go(data.page - 1)} a11y="더 이후 기록" />
+          <Arrow label="›" show={newer} loading={loading} onPress={() => go(data.page - 1)} a11y="더 이후 기록" />
         </View>
 
         <View style={[styles.card, loading && { opacity: 0.5 }]}>
@@ -105,10 +105,12 @@ export function PrevRecords({ exerciseId, exerciseName, first, onClose, onEmpty 
   );
 }
 
-function Arrow({ label, enabled, onPress, a11y }: { label: string; enabled: boolean; onPress: () => void; a11y: string }) {
+/** Hidden at the end of the records (an empty slot keeps the date centered); dimmed while a page loads. */
+function Arrow({ label, show, loading, onPress, a11y }: { label: string; show: boolean; loading: boolean; onPress: () => void; a11y: string }) {
+  if (!show) return <View style={styles.arrow} />;
   return (
-    <Pressable style={[styles.arrow, enabled ? styles.arrowOn : styles.arrowOff]} onPress={onPress} disabled={!enabled} accessibilityLabel={a11y}>
-      <Text style={[styles.arrowText, { color: enabled ? Palette.bg : Palette.muted }]}>{label}</Text>
+    <Pressable style={[styles.arrow, loading && { opacity: 0.35 }]} onPress={onPress} disabled={loading} hitSlop={8} accessibilityLabel={a11y}>
+      <Text style={styles.arrowText}>{label}</Text>
     </Pressable>
   );
 }
@@ -123,10 +125,8 @@ const styles = StyleSheet.create({
   navCenter: { flex: 1, alignItems: 'center', gap: 4 },
   date: { fontFamily: Font.outfit.extrabold, fontSize: 18, color: '#fff' },
   position: { fontFamily: Font.manrope.regular, fontSize: 11, color: Palette.muted },
-  arrow: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  arrowOn: { backgroundColor: Palette.accent },
-  arrowOff: { backgroundColor: Palette.card, opacity: 0.35 },
-  arrowText: { fontFamily: Font.outfit.extrabold, fontSize: 26 },
+  arrow: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  arrowText: { fontFamily: Font.outfit.extrabold, fontSize: 26, color: '#fff' },
   card: { backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, borderRadius: 20, padding: 16, gap: 12 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   cardTitle: { fontFamily: Font.outfit.extrabold, fontSize: 18, color: '#fff' },
