@@ -1,8 +1,9 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView as RNScrollView, StyleSheet, Text, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
+import { useAnimatedRef } from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
 import { ExerciseItem, deleteExercise, getExercises, reorderExercises } from '@/api/workout';
@@ -32,7 +33,7 @@ export default function ManageExercisesScreen() {
   const [target, setTarget] = useState<ExerciseItem | null>(null);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false); // no dragging until the previous order is saved
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useAnimatedRef<RNScrollView>();
   const categoryName = categories.find((c) => c.id === selected)?.name ?? '';
 
   // This tab screen stays mounted: every entry starts on the body part it came from,
