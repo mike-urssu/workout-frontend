@@ -83,6 +83,7 @@ export async function uploadMedia(sid: string, file: { uri: string; name: string
   try {
     res = await local.upload(`${BASE_URL}${path}`, {
       uploadType: UploadType.MULTIPART,
+      fieldName: 'file', // the docs say 'file' is the default, but native code falls back to the file name
       mimeType: file.type,
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       onProgress: ({ bytesSent, totalBytes }) => totalBytes && onProgress?.(bytesSent / totalBytes),
