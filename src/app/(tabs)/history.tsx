@@ -42,8 +42,8 @@ export default function HistoryScreen() {
     }
   }, []);
 
-  /** Loads a month (no argument = the server picks the latest recorded month) and selects its latest day. */
-  const loadMonth = useCallback(async (target?: string) => {
+  /** Loads a month and selects `select` (null = nothing selected, e.g. when paging months). */
+  const loadMonth = useCallback(async (target: string, select: string | null = null) => {
     try {
       const data = await getMonth(target);
       setMonthData(data);
@@ -51,8 +51,7 @@ export default function HistoryScreen() {
         const [y, m] = data.month.split('-').map(Number);
         setMonth({ y, m: m - 1 });
       }
-      // On the first load open the latest day; when paging months keep the selection empty.
-      await loadDay(target ? null : data.latestDate);
+      await loadDay(select);
     } catch (e) {
       setMonthData(null);
       notify(errorMessage(e));
@@ -60,9 +59,12 @@ export default function HistoryScreen() {
     setLoaded(true);
   }, [loadDay]);
 
+  // Every entry opens on today.
   useFocusEffect(
     useCallback(() => {
-      loadMonth();
+      const t = new Date();
+      setMonth({ y: t.getFullYear(), m: t.getMonth() });
+      loadMonth(ym(t.getFullYear(), t.getMonth()), `${ym(t.getFullYear(), t.getMonth())}-${pad(t.getDate())}`);
     }, [loadMonth]),
   );
 
