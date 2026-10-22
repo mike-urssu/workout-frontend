@@ -19,7 +19,9 @@ export type Session = {
   categories: { id: string; name: string; setCount: number; volume: number; sessionExerciseIds: string[] }[];
   summary: { durationSeconds: number | null; exerciseCount: number; totalSets: number; totalRepetitions: number; totalVolume: number };
 };
-export type LastRecord = { performedDate: string; sets: { setNumber: number; weight: number; repetitions: number }[] };
+/** One completed session of an exercise (API-SET-006). */
+export type ExerciseRecord = { performedDate: string; sets: { setNumber: number; weight: number; repetitions: number }[] };
+export type Page<T> = { content: T[]; page: number; size: number; totalElements: number; totalPages: number };
 export type MediaItem = { id: string; mediaType: 'PHOTO' | 'VIDEO'; contentType: string; previewUrl: string; displayUrl?: string; originalUrl: string }; // displayUrl: backend workout-media v0.5+
 export type MonthDay = { date: string; categories: CategoryRef[] };
 export type Month = { month: string | null; latestDate: string | null; days: MonthDay[] };
@@ -45,8 +47,9 @@ export const deleteExercise = (id: string) => request(`/api/v1/exercises/${id}`,
 /** Every exercise of the body part, in the new order; 409 EXERCISE_ORDER_OUTDATED if the list changed meanwhile. */
 export const reorderExercises = (categoryId: string, exerciseIds: string[]) =>
   request(`/api/v1/exercise-categories/${categoryId}/exercise-order`, { method: 'PUT', body: { exerciseIds } });
-export const getLastRecord = async (exerciseId: string) =>
-  orNull(await request<LastRecord | undefined>(`/api/v1/exercises/${exerciseId}/last-record`));
+/** One session per page, page 0 = the most recent (workout-exercise design v0.11). */
+export const getRecords = (exerciseId: string, page = 0) =>
+  request<Page<ExerciseRecord>>(`/api/v1/exercises/${exerciseId}/records?page=${page}`);
 
 export const getInProgress = async () => orNull(await request<Session | undefined>(`${sessions}/in-progress`));
 export const startSession = () =>
@@ -65,7 +68,6 @@ export const updateSet = (sid: string, seid: string, setId: string, weight: numb
   request<SetDto>(`${setsPath(sid, seid)}/${setId}`, { method: 'PUT', body: { weight, repetitions } });
 export const deleteSet = (sid: string, seid: string, setId: string) =>
   request(`${setsPath(sid, seid)}/${setId}`, { method: 'DELETE' });
-export const clearSets = (sid: string, seid: string) => request(setsPath(sid, seid), { method: 'DELETE' });
 
 /** Uploads one photo/video (temporary until the session is completed). `onProgress` gets 0–1, native only (fetch can't report upload progress). */
 export async function uploadMedia(sid: string, file: { uri: string; name: string; type: string }, onProgress?: (ratio: number) => void) {

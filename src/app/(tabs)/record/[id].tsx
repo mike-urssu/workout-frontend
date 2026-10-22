@@ -1,12 +1,13 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Clock, History, Plus, Sparkles, X } from 'lucide-react-native';
+import { Clock, Plus, X } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
 import {
-  LastRecord, Session, SessionExercise, addSet, clearSets, deleteSet, getInProgress, getLastRecord, toMs, updateSet,
+  ExerciseRecord, Page, Session, SessionExercise, addSet, deleteSet, getInProgress, getRecords, toMs, updateSet,
 } from '@/api/workout';
+import { PrevRecords } from '@/components/prev-records';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { RoutineButton, RoutineSheet } from '@/components/routine-sheet';
@@ -14,19 +15,19 @@ import { SwipeBack } from '@/components/swipe-back';
 import { Font, Palette } from '@/constants/theme';
 import { clockSec, elapsed } from '@/data/workout';
 import { useElapsed } from '@/hooks/use-elapsed';
-import { confirm, errorMessage, notify } from '@/lib/dialog';
+import { errorMessage, notify } from '@/lib/dialog';
 
-/** One table row. `id` = saved on the server; no id = still a draft (or a not-yet-applied previous value). */
+/** One table row. `id` = saved on the server; no id = still a draft. */
 type Row = {
   key: string; id?: string; weight: number | null; reps: number | null; time: string;
-  prefilled?: boolean; saving?: boolean; invalid?: boolean;
+  saving?: boolean; invalid?: boolean;
   /** last values the server has, to skip a PUT when nothing changed */
   saved?: { weight: number; reps: number };
 };
 
 const TIME_W = 66; // fits "14:23:05"
 let draftSeq = 0;
-const draft = (weight: number | null, over: Partial<Row> = {}): Row => ({ key: `draft-${draftSeq++}`, weight, reps: null, time: '', ...over });
+const draft = (): Row => ({ key: `draft-${draftSeq++}`, weight: null, reps: null, time: '' });
 const fromServer = (s: SessionExercise['sets'][number]): Row => ({
   key: s.id, id: s.id, weight: s.weight, reps: s.repetitions, time: clockSec(toMs(s.createdAt)),
   saved: { weight: s.weight, reps: s.repetitions },
@@ -41,8 +42,8 @@ export default function RecordScreen() {
   }>();
   const [session, setSession] = useState<Session | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
-  const [prev, setPrev] = useState<LastRecord | null>(null);
-  const [loadedPrev, setLoadedPrev] = useState(false);
+  const [prev, setPrev] = useState<Page<ExerciseRecord> | null>(null);
+  const [prevOpen, setPrevOpen] = useState(false);
   const [routineOpen, setRoutineOpen] = useState(false);
   const seconds = useElapsed(session ? toMs(session.startedAt) : undefined);
 
@@ -65,9 +66,9 @@ export default function RecordScreen() {
           const mine = s?.id === sessionId ? s.exercises.find((e) => e.sessionExerciseId === sessionExerciseId) : undefined;
           if (!s || !mine) return fail(new ApiError(404, 'WORKOUT_SESSION_NOT_FOUND', '진행 중인 운동을 찾을 수 없어요.'));
           setSession(s);
-          setRows(mine.sets.length ? mine.sets.map(fromServer) : [draft(null)]);
-          setLoadedPrev(false);
-          setPrev(await getLastRecord(id));
+          setRows(mine.sets.length ? mine.sets.map(fromServer) : [draft()]);
+          setPrevOpen(false);
+          setPrev(await getRecords(id).catch(() => null)); // recording works without it; the button then reads "이전 기록 없음"
         } catch (e) {
           fail(e);
         }
@@ -91,7 +92,7 @@ export default function RecordScreen() {
         ? await updateSet(sessionId, sessionExerciseId, row.id, row.weight, row.reps)
         : await addSet(sessionId, sessionExerciseId, row.weight, row.reps);
       // ponytail: edits made while this request is in flight are not saved; blur again to save them
-      patch(key, { id: saved.id, time: clockSec(toMs(saved.createdAt)), prefilled: false, saving: false, saved: { weight: saved.weight, reps: saved.repetitions } });
+      patch(key, { id: saved.id, time: clockSec(toMs(saved.createdAt)), saving: false, saved: { weight: saved.weight, reps: saved.repetitions } });
     } catch (e) {
       patch(key, { saving: false, invalid: e instanceof ApiError && e.code === 'VALIDATION_FAILED' });
       fail(e);
@@ -101,30 +102,25 @@ export default function RecordScreen() {
   const remove = async (row: Row) => {
     try {
       if (row.id) await deleteSet(sessionId, sessionExerciseId, row.id);
-      setRows((all) => (all.length > 1 ? all.filter((r) => r.key !== row.key) : [draft(null)]));
+      setRows((all) => (all.length > 1 ? all.filter((r) => r.key !== row.key) : [draft()]));
     } catch (e) {
       fail(e);
     }
   };
 
-  const addRow = () => setRows((all) => [...all, draft(null)]);
+  const addRow = () => setRows((all) => [...all, draft()]);
 
-  /** BR-021: loading replaces the sets of this exercise; saved sets are deleted after a confirmation. */
-  const loadPrev = async () => {
-    if (!prev) return;
-    const hasSaved = rows.some((r) => r.id);
-    if (hasSaved && !(await confirm('이전 기록으로 덮어쓸까요?', '덮어쓰기', '지금 기록한 세트가 모두 삭제돼요.'))) return;
-    try {
-      if (hasSaved) await clearSets(sessionId, sessionExerciseId);
-    } catch (e) {
-      return fail(e);
-    }
-    setRows(prev.sets.map((s) => draft(s.weight, { reps: s.repetitions, prefilled: true })));
-    setLoadedPrev(true);
-  };
+  const hasPrev = !!prev?.totalElements;
+  const closePrev = useCallback(() => setPrevOpen(false), []);
 
-  const hasPrefilled = rows.some((r) => r.prefilled);
-  const prevDate = prev ? new Date(`${prev.performedDate}T00:00:00`) : null;
+  // Shown in place of the record screen (the tab bar stays, as in the design); the rows above are kept.
+  if (prevOpen && prev && hasPrev) {
+    return (
+      <Screen>
+        <PrevRecords exerciseId={id} exerciseName={ex?.name ?? ''} first={prev} onClose={closePrev} onEmpty={() => { setPrev(null); setPrevOpen(false); }} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen>
@@ -136,11 +132,8 @@ export default function RecordScreen() {
         // Tabs' back goes to the first tab (home); we want this exercise's list instead.
         onBack={backToList}
         right={
-          <Pressable style={[styles.prevBtn, loadedPrev && styles.prevBtnLoaded, !prev && { opacity: 0.4 }]} onPress={loadPrev} disabled={!prev}>
-            {loadedPrev && <History size={12} color={Palette.accent} />}
-            <Text style={[styles.prevText, loadedPrev && { color: Palette.accent, fontFamily: Font.manrope.bold }]}>
-              {!prev ? '이전 기록 없음' : loadedPrev ? '다시 불러오기' : '이전 기록 불러오기'}
-            </Text>
+          <Pressable style={[styles.prevBtn, !hasPrev && { opacity: 0.4 }]} onPress={() => setPrevOpen(true)} disabled={!hasPrev}>
+            <Text style={styles.prevText} numberOfLines={1}>{hasPrev ? '이전 기록 조회' : '이전 기록 없음'}</Text>
           </Pressable>
         }
       />
@@ -163,47 +156,25 @@ export default function RecordScreen() {
           </View>
         </View>
 
-        {hasPrefilled && prevDate && (
-          <View style={styles.banner}>
-            <Sparkles size={18} color={Palette.accent} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.bannerTitle}>{`이전 기록 (${prevDate.getMonth() + 1}월 ${prevDate.getDate()}일) 세트가 로드됨`}</Text>
-              <Text style={styles.bannerSub}>값을 터치하여 이번 운동으로 적용하거나 편집하세요.</Text>
-            </View>
-          </View>
-        )}
-
         <View style={styles.table}>
           <View style={[styles.tr, styles.thead]}>
-            <Text style={[styles.th, { width: hasPrefilled ? 60 : 45 }]}>세트</Text>
-            {!hasPrefilled && <Text style={[styles.th, styles.thDim, { width: TIME_W }]}>시간</Text>}
+            <Text style={[styles.th, { width: 45 }]}>세트</Text>
+            <Text style={[styles.th, styles.thDim, { width: TIME_W }]}>시간</Text>
             <Text style={[styles.th, { flex: 1 }]}>무게 (kg)</Text>
             <Text style={[styles.th, { flex: 1 }]}>횟수 (회)</Text>
             <View style={{ width: 36 }} />
           </View>
           {rows.map((s, i) => (
             <View key={s.key} style={[styles.tr, styles.trBody, i < rows.length - 1 && styles.trDivider]}>
-              <Text style={[styles.setLabel, { width: hasPrefilled ? 60 : 45 }, !s.id && !s.prefilled && { color: Palette.muted }]}>
+              <Text style={[styles.setLabel, { width: 45 }, !s.id && { color: Palette.muted }]}>
                 {`${i + 1}세트`}
               </Text>
-              {!hasPrefilled && <Text style={styles.time}>{s.time}</Text>}
+              <Text style={styles.time}>{s.time}</Text>
               <View style={styles.cell}>
-                {s.prefilled ? (
-                  <Pressable style={[styles.input, styles.dimmed]} onPress={() => commit(s.key, {})}>
-                    <Text style={styles.inputText}>{s.weight ?? '-'}</Text>
-                  </Pressable>
-                ) : (
-                  <NumberInput value={s.weight} invalid={s.invalid} onCommit={(v) => commit(s.key, { weight: v })} decimal />
-                )}
+                <NumberInput value={s.weight} invalid={s.invalid} onCommit={(v) => commit(s.key, { weight: v })} decimal />
               </View>
               <View style={styles.cell}>
-                {s.prefilled ? (
-                  <Pressable style={[styles.input, styles.dimmed]} onPress={() => commit(s.key, {})}>
-                    <Text style={styles.inputText}>{s.reps ?? '-'}</Text>
-                  </Pressable>
-                ) : (
-                  <NumberInput value={s.reps} invalid={s.invalid} onCommit={(v) => commit(s.key, { reps: v })} />
-                )}
+                <NumberInput value={s.reps} invalid={s.invalid} onCommit={(v) => commit(s.key, { reps: v })} />
               </View>
               <Pressable style={styles.delete} onPress={() => remove(s)} hitSlop={6}>
                 <X size={20} color="rgba(255,255,255,0.4)" />
@@ -263,11 +234,10 @@ function NumberInput({ value, onCommit, decimal, invalid }: { value: number | nu
 
 const styles = StyleSheet.create({
   prevBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6,
+    width: 124, height: 32, justifyContent: 'center', paddingHorizontal: 12,
     borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
   },
-  prevBtnLoaded: { backgroundColor: 'rgba(178,224,0,0.13)', borderColor: Palette.accent, borderWidth: 1.5 },
-  prevText: { fontFamily: Font.manrope.medium, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
+  prevText: { fontFamily: Font.manrope.medium, fontSize: 12, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
   body: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24, gap: 16 },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   pill: {
@@ -281,12 +251,6 @@ const styles = StyleSheet.create({
     borderRadius: 100, backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border,
   },
   timerText: { fontFamily: Font.outfit.extrabold, fontSize: 16, color: '#fff' },
-  banner: {
-    flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12,
-    borderRadius: 14, backgroundColor: 'rgba(178,224,0,0.13)', borderWidth: 1, borderColor: Palette.accent,
-  },
-  bannerTitle: { fontFamily: Font.manrope.bold, fontSize: 13, color: '#fff' },
-  bannerSub: { fontFamily: Font.manrope.regular, fontSize: 11, color: Palette.muted },
   table: { backgroundColor: Palette.card, borderWidth: 1, borderColor: Palette.border, borderRadius: 20, overflow: 'hidden' },
   tr: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
   thead: { backgroundColor: '#26262b', paddingVertical: 14 },
@@ -305,7 +269,6 @@ const styles = StyleSheet.create({
   inputEmpty: { backgroundColor: Palette.border, borderColor: Palette.dim },
   inputFocused: { backgroundColor: Palette.border, borderColor: Palette.accent, borderWidth: 1.5 },
   inputInvalid: { borderColor: Palette.danger, borderWidth: 1.5 },
-  dimmed: { width: 76, paddingVertical: 6, backgroundColor: Palette.inset, opacity: 0.5 },
   delete: { width: 36, height: 38, alignItems: 'center', justifyContent: 'center' },
   addSet: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14,
