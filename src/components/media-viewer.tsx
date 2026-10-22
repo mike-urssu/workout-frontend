@@ -79,7 +79,7 @@ function Item({ item, active }: { item: MediaItem; active: boolean }) {
   const display = useFileSource(item.displayUrl ?? item.originalUrl);
   const preview = useFileSource(item.previewUrl);
   if (item.mediaType === 'VIDEO') return display ? <Video source={display} active={active} /> : null;
-  return <Image source={display ?? preview} placeholder={preview ?? undefined} style={styles.fill} contentFit="cover" />;
+  return <Image source={display ?? preview} placeholder={preview ?? undefined} placeholderContentFit="cover" style={styles.fill} contentFit="cover" />;
 }
 
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
