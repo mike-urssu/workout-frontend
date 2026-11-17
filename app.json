@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.mikeurssu.letsworkout"
+      "bundleIdentifier": "com.mikeurssu.letsworkout",
+      "appleTeamId": "K695N597JC"
     },
     "android": {
       "adaptiveIcon": {
@@ -42,6 +43,7 @@
         }
       ],
       "expo-secure-store",
+      "./plugins/with-scene-lifecycle",
       [
         "expo-image-picker",
         {
