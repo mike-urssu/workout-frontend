@@ -10,8 +10,6 @@ import { Font, Palette } from '@/constants/theme';
 import { loadCategories, styleOf, useCategories } from '@/hooks/use-categories';
 import { errorMessage, notify } from '@/lib/dialog';
 
-// A body part has at most 8 exercises and all of them can be selected, so there are 8 line colours.
-const LINE_COLORS = ['#b2e000', '#668aff', '#cc66ff', '#ff9933', '#ff6b8b', '#2ed3b7', '#ffd23f', '#8fa3b8'];
 const label = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
 /** One chart's days loaded so far, oldest first; each series' values line up with `dates`. */
@@ -102,33 +100,33 @@ export default function StatsScreen() {
   // Top chart: one body part's volume per day it was trained.
   const [topId, setTopId] = useState<string | null>(null);
   const top = useStrip(guard);
-  // Bottom chart: its own body part, its exercises, and the picked ones' volumes on the days they were done (BR-015).
+  // Bottom chart: its own body part, its exercises, and the picked one's volumes on the days it was done (BR-015).
   const [bottomId, setBottomId] = useState<string | null>(null);
   const [exercises, setExercises] = useState<StatsExercise[]>([]);
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string | null>(null);
   const bottom = useStrip(guard);
 
   const topPage = (id: string): Page => async (before) => {
     const t = await getCategoryTrend(id, before);
     return { dates: t.dates, series: [{ id, name: '', values: t.volumes }], hasPrevious: t.hasPrevious };
   };
-  /** The days any of the exercises was done (BR-015); nothing is requested for 0 exercises. */
-  const bottomPage = (ids: string[]): Page | null =>
-    ids.length
+  /** The days the exercise was done (BR-015); nothing is requested without one. */
+  const bottomPage = (id: string | null): Page | null =>
+    id
       ? async (before) => {
-          const t = await getExerciseTrend(ids, before);
+          const t = await getExerciseTrend([id], before);
           return { dates: t.dates, series: t.exercises.map((e) => ({ id: e.id, name: e.name, values: e.volumes })), hasPrevious: t.hasPrevious };
         }
       : null;
 
-  /** The exercise list follows the bottom chart's body part, and all its recorded exercises are selected (BR-010, BR-017). */
+  /** The exercise list follows the bottom chart's body part, and its first recorded exercise is selected (BR-010). */
   const chooseBottom = async (id: string) => {
     setBottomId(id);
     const list = await getStatsExercises(id);
-    const ids = list.map((e) => e.id);
+    const first = list[0]?.id ?? null;
     setExercises(list);
-    setPicked(ids);
-    await bottom.load(bottomPage(ids));
+    setPicked(first);
+    await bottom.load(bottomPage(first));
   };
 
   // Opening the screen always starts from chest in both charts and the latest days.
@@ -152,17 +150,15 @@ export default function StatsScreen() {
       await top.load(topPage(id));
     });
 
-  /** A new selection has its own days, so it starts again from the latest ones. */
-  const toggle = (id: string) => {
-    if (loading) return;
-    const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
-    setPicked(next);
-    guard(() => bottom.load(bottomPage(next)));
+  /** One exercise at a time; a new one has its own days, so it starts again from the latest ones. */
+  const pick = (id: string) => {
+    if (loading || id === picked) return;
+    setPicked(id);
+    guard(() => bottom.load(bottomPage(id)));
   };
 
-  const colorOf = (id: string) => LINE_COLORS[Math.max(0, picked.indexOf(id)) % LINE_COLORS.length];
   // The previous response stays on screen until the new one arrives; draw only what is still selected.
-  const shown = (bottom.view?.strip.series ?? []).filter((e) => picked.includes(e.id));
+  const shown = (bottom.view?.strip.series ?? []).filter((e) => e.id === picked);
   const topCategory = categories.find((c) => c.id === topId);
   const topColor = styleOf(topCategory?.name ?? '')?.color ?? Palette.accent;
 
@@ -206,14 +202,14 @@ export default function StatsScreen() {
         <View style={styles.chips}>
           {bottomId && exercises.length === 0 && !loading && <Text style={styles.empty}>이 부위에 기록한 운동이 없어요</Text>}
           {exercises.map((ex) => {
-            const on = picked.includes(ex.id);
+            const on = ex.id === picked;
             return (
               <Pressable
                 key={ex.id}
                 disabled={loading}
-                onPress={() => toggle(ex.id)}
-                style={[styles.chip, on ? { backgroundColor: '#26262b', borderColor: colorOf(ex.id) } : { borderColor: Palette.border }]}>
-                <Text style={[styles.chipText, on ? { color: colorOf(ex.id), fontFamily: Font.manrope.bold } : { color: Palette.muted }]}>{ex.name}</Text>
+                onPress={() => pick(ex.id)}
+                style={[styles.chip, on ? { backgroundColor: '#26262b', borderColor: Palette.accent } : { borderColor: Palette.border }]}>
+                <Text style={[styles.chipText, on ? { color: Palette.accent, fontFamily: Font.manrope.bold } : { color: Palette.muted }]}>{ex.name}</Text>
               </Pressable>
             );
           })}
@@ -221,7 +217,7 @@ export default function StatsScreen() {
         <View style={styles.card}>
           <LineChart
             key={bottom.view?.serial}
-            series={shown.map((e) => ({ color: colorOf(e.id), values: e.values }))}
+            series={shown.map((e) => ({ color: Palette.accent, values: e.values }))}
             labels={bottom.view?.strip.dates.map(label) ?? []}
             visible={bottom.view?.visible ?? 0}
             fromEnd={bottom.view?.fromEnd ?? 0}
@@ -237,8 +233,8 @@ export default function StatsScreen() {
           <View style={styles.legend}>
             {shown.map((e) => (
               <View key={e.id} style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: colorOf(e.id) }]} />
-                <Text style={[styles.legendText, { color: colorOf(e.id) }]}>{e.name}</Text>
+                <View style={[styles.legendDot, { backgroundColor: Palette.accent }]} />
+                <Text style={[styles.legendText, { color: Palette.accent }]}>{e.name}</Text>
               </View>
             ))}
           </View>
