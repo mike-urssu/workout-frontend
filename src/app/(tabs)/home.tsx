@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Camera, LogOut } from 'lucide-react-native';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
@@ -218,14 +218,28 @@ function CompleteSheet({ session, seconds, visible, onClose, onDone }: CompleteP
   }));
   const sent = picked.filter((a) => uploaded[a.uri]).length;
 
-  const pick = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      allowsMultipleSelection: true,
-      selectionLimit: MAX_MEDIA - picked.length,
-    });
+  const pickFrom = async (camera: boolean) => {
+    if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+      notify('카메라 권한이 필요해요. 설정에서 허용해 주세요.');
+      return;
+    }
+    const res = camera
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], videoMaxDuration: 60 })
+      : await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_MEDIA - picked.length,
+      });
     if (!res.canceled) setPicked((m) => [...m, ...res.assets].slice(0, MAX_MEDIA));
   };
+
+  const pick = () => Platform.OS === 'web'
+    ? pickFrom(false)
+    : Alert.alert('사진 또는 동영상 추가', undefined, [
+      { text: '촬영하기', onPress: () => pickFrom(true) },
+      { text: '앨범에서 선택', onPress: () => pickFrom(false) },
+      { text: '취소', style: 'cancel' },
+    ]);
 
   /** Upload what is not uploaded yet, then complete with the ids in picked order. Any failure stops before completing (BR-007). */
   const save = async (withMedia: boolean) => {
