@@ -102,10 +102,7 @@ export default function HistoryScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={{ gap: 8 }}>
-          <Text style={styles.title}>운동 기록</Text>
-          <Text style={styles.subtitle}>{`${month.y}년 ${month.m + 1}월`}</Text>
-        </View>
+        <Text style={styles.title}>운동 기록</Text>
 
         <View style={styles.calendar}>
           <View style={styles.calHeader}>
@@ -138,10 +135,7 @@ export default function HistoryScreen() {
 
         <View style={styles.dayCard}>
           <View style={styles.dayHeader}>
-            <View style={{ gap: 4 }}>
-              <Text style={styles.dayTitle}>{`${selDate.getMonth() + 1}월 ${selDate.getDate()}일 (${weekday(selDate)})`}</Text>
-              <Text style={styles.subtitle}>선택한 날짜의 세션 기록</Text>
-            </View>
+            <Text style={styles.dayTitle}>{`${selDate.getMonth() + 1}월 ${selDate.getDate()}일 (${weekday(selDate)})`}</Text>
             {day && day.durationSeconds > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{minSec(day.durationSeconds)}</Text></View>}
           </View>
 
@@ -195,7 +189,6 @@ function Thumb({ item, onPress }: { item: MediaItem; onPress: () => void }) {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 24, paddingVertical: 16, gap: 16 },
   title: { fontFamily: Font.outfit.bold, fontSize: 22, color: '#fff' },
-  subtitle: { fontFamily: Font.manrope.regular, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
   calendar: {
     backgroundColor: Palette.inset, borderWidth: 1, borderColor: '#2a2a33', borderRadius: 24, padding: 16, gap: 12,
     shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 12 },
